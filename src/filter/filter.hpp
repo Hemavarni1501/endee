@@ -325,6 +325,92 @@ public:
                     throw std::runtime_error(
                             "$range operator is only supported for numeric fields");
                 }
+            } else if(op == "$gt") {
+                // Greater than (exclusive): value > N
+                if(type != FieldType::Number) {
+                    throw std::runtime_error(
+                            "$gt operator is only supported for numeric fields");
+                }
+
+                uint32_t sortable_val;
+                if(val.is_number_integer()) {
+                    sortable_val = ndd::filter::int_to_sortable(val.get<int>());
+                } else if(val.is_number()) {
+                    sortable_val = ndd::filter::float_to_sortable(val.get<float>());
+                } else {
+                    throw std::runtime_error("$gt value must be a number");
+                }
+
+                // Handle edge case: if value is maximum, no values can be greater
+                if(sortable_val == UINT32_MAX) {
+                    or_result = ndd::RoaringBitmap(); // empty bitmap
+                } else {
+                    // Greater than is implemented as range [value+1, MAX]
+                    or_result = numeric_index_->range(field, sortable_val + 1, UINT32_MAX);
+                }
+
+            } else if(op == "$ge") {
+                // Greater than or equal (inclusive): value >= N
+                if(type != FieldType::Number) {
+                    throw std::runtime_error(
+                            "$ge operator is only supported for numeric fields");
+                }
+
+                uint32_t sortable_val;
+                if(val.is_number_integer()) {
+                    sortable_val = ndd::filter::int_to_sortable(val.get<int>());
+                } else if(val.is_number()) {
+                    sortable_val = ndd::filter::float_to_sortable(val.get<float>());
+                } else {
+                    throw std::runtime_error("$ge value must be a number");
+                }
+
+                // Greater than or equal is implemented as range [value, MAX]
+                or_result = numeric_index_->range(field, sortable_val, UINT32_MAX);
+
+            } else if(op == "$lt") {
+                // Less than (exclusive): value < N
+                if(type != FieldType::Number) {
+                    throw std::runtime_error(
+                            "$lt operator is only supported for numeric fields");
+                }
+
+                uint32_t sortable_val;
+                if(val.is_number_integer()) {
+                    sortable_val = ndd::filter::int_to_sortable(val.get<int>());
+                } else if(val.is_number()) {
+                    sortable_val = ndd::filter::float_to_sortable(val.get<float>());
+                } else {
+                    throw std::runtime_error("$lt value must be a number");
+                }
+
+                // Handle edge case: if value is minimum, no values can be less
+                if(sortable_val == 0) {
+                    or_result = ndd::RoaringBitmap(); // empty bitmap
+                } else {
+                    // Less than is implemented as range [0, value-1]
+                    or_result = numeric_index_->range(field, 0, sortable_val - 1);
+                }
+
+            } else if(op == "$le") {
+                // Less than or equal (inclusive): value <= N
+                if(type != FieldType::Number) {
+                    throw std::runtime_error(
+                            "$le operator is only supported for numeric fields");
+                }
+
+                uint32_t sortable_val;
+                if(val.is_number_integer()) {
+                    sortable_val = ndd::filter::int_to_sortable(val.get<int>());
+                } else if(val.is_number()) {
+                    sortable_val = ndd::filter::float_to_sortable(val.get<float>());
+                } else {
+                    throw std::runtime_error("$le value must be a number");
+                }
+
+                // Less than or equal is implemented as range [0, value]
+                or_result = numeric_index_->range(field, 0, sortable_val);
+
             } else {
                 throw std::runtime_error("Unsupported operator: " + op);
             }

@@ -214,6 +214,250 @@ TEST_F(FilterTest, NumericDelete) {
     // Remove
     // remove_filters_from_json uses the whole object
     filter->remove_filters_from_json(1, R"({"score": 100})");
-    
+
     EXPECT_EQ(filter->countIdsMatchingFilter(query), 0);
+}
+
+TEST_F(FilterTest, GtOperatorInteger) {
+    // Setup: ID 100: age=20, ID 101: age=25, ID 102: age=30, ID 103: age=35
+    filter->add_filters_from_json(100, R"({"age": 20})");
+    filter->add_filters_from_json(101, R"({"age": 25})");
+    filter->add_filters_from_json(102, R"({"age": 30})");
+    filter->add_filters_from_json(103, R"({"age": 35})");
+
+    // Query: age > 25
+    json query = json::array({
+        {{"age", {{"$gt", 25}}}}
+    });
+
+    auto ids = filter->getIdsMatchingFilter(query);
+
+    // Should match 102 (30) and 103 (35), NOT 101 (25)
+    EXPECT_EQ(ids.size(), 2);
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids[0], 102);
+    EXPECT_EQ(ids[1], 103);
+}
+
+TEST_F(FilterTest, GeOperatorInteger) {
+    // Setup: ID 100: age=20, ID 101: age=25, ID 102: age=30, ID 103: age=35
+    filter->add_filters_from_json(100, R"({"age": 20})");
+    filter->add_filters_from_json(101, R"({"age": 25})");
+    filter->add_filters_from_json(102, R"({"age": 30})");
+    filter->add_filters_from_json(103, R"({"age": 35})");
+
+    // Query: age >= 25
+    json query = json::array({
+        {{"age", {{"$ge", 25}}}}
+    });
+
+    auto ids = filter->getIdsMatchingFilter(query);
+
+    // Should match 101 (25), 102 (30), and 103 (35)
+    EXPECT_EQ(ids.size(), 3);
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids[0], 101);
+    EXPECT_EQ(ids[1], 102);
+    EXPECT_EQ(ids[2], 103);
+}
+
+TEST_F(FilterTest, GtGeOperatorFloat) {
+    // Setup with float values
+    filter->add_filters_from_json(1, R"({"price": 9.99})");
+    filter->add_filters_from_json(2, R"({"price": 10.5})");
+    filter->add_filters_from_json(3, R"({"price": 15.0})");
+    filter->add_filters_from_json(4, R"({"price": 20.25})");
+
+    // Test $gt
+    json query_gt = json::array({
+        {{"price", {{"$gt", 10.5}}}}
+    });
+    auto ids_gt = filter->getIdsMatchingFilter(query_gt);
+    EXPECT_EQ(ids_gt.size(), 2); // IDs 3, 4
+
+    // Test $ge
+    json query_ge = json::array({
+        {{"price", {{"$ge", 10.5}}}}
+    });
+    auto ids_ge = filter->getIdsMatchingFilter(query_ge);
+    EXPECT_EQ(ids_ge.size(), 3); // IDs 2, 3, 4
+}
+
+TEST_F(FilterTest, GtOperatorEdgeCaseMax) {
+    // Setup
+    filter->add_filters_from_json(1, R"({"value": 2147483647})"); // INT32_MAX
+    filter->add_filters_from_json(2, R"({"value": 2147483646})");
+
+    // Query: value > INT32_MAX
+    json query = json::array({
+        {{"value", {{"$gt", 2147483647}}}}
+    });
+
+    auto ids = filter->getIdsMatchingFilter(query);
+
+    // Should return empty (no value greater than max int)
+    EXPECT_EQ(ids.size(), 0);
+}
+
+TEST_F(FilterTest, GtWithAndLogic) {
+    // Setup: ID 1: city=NY, age=30, ID 2: city=NY, age=40, ID 3: city=LA, age=40
+    filter->add_filters_from_json(1, R"({"city": "NY", "age": 30})");
+    filter->add_filters_from_json(2, R"({"city": "NY", "age": 40})");
+    filter->add_filters_from_json(3, R"({"city": "LA", "age": 40})");
+
+    // Query: city=NY AND age > 35
+    json query = json::array({
+        {{"city", {{"$eq", "NY"}}}},
+        {{"age", {{"$gt", 35}}}}
+    });
+
+    auto ids = filter->getIdsMatchingFilter(query);
+
+    // Should match only ID 2 (NY + age 40)
+    EXPECT_EQ(ids.size(), 1);
+    EXPECT_EQ(ids[0], 2);
+}
+
+TEST_F(FilterTest, GtOperatorErrorNonNumeric) {
+    // Setup string field
+    filter->add_to_filter("city", "Paris", 1);
+
+    // Query: city > "Paris" (should throw error)
+    json query = json::array({
+        {{"city", {{"$gt", "Paris"}}}}
+    });
+
+    EXPECT_THROW(
+        filter->getIdsMatchingFilter(query),
+        std::runtime_error
+    );
+}
+
+TEST_F(FilterTest, GtGeOperatorNegativeNumbers) {
+    // Setup with negative numbers
+    filter->add_filters_from_json(1, R"({"temperature": -10})");
+    filter->add_filters_from_json(2, R"({"temperature": -5})");
+    filter->add_filters_from_json(3, R"({"temperature": 0})");
+    filter->add_filters_from_json(4, R"({"temperature": 5})");
+
+    // Query: temperature > -5
+    json query_gt = json::array({
+        {{"temperature", {{"$gt", -5}}}}
+    });
+    auto ids_gt = filter->getIdsMatchingFilter(query_gt);
+    EXPECT_EQ(ids_gt.size(), 2); // IDs 3, 4 (0 and 5)
+
+    // Query: temperature >= -5
+    json query_ge = json::array({
+        {{"temperature", {{"$ge", -5}}}}
+    });
+    auto ids_ge = filter->getIdsMatchingFilter(query_ge);
+    EXPECT_EQ(ids_ge.size(), 3); // IDs 2, 3, 4 (-5, 0, 5)
+}
+
+TEST_F(FilterTest, LtOperatorInteger) {
+    // Setup: ID 100: age=20, ID 101: age=25, ID 102: age=30, ID 103: age=35
+    filter->add_filters_from_json(100, R"({"age": 20})");
+    filter->add_filters_from_json(101, R"({"age": 25})");
+    filter->add_filters_from_json(102, R"({"age": 30})");
+    filter->add_filters_from_json(103, R"({"age": 35})");
+
+    // Query: age < 30
+    json query = json::array({
+        {{"age", {{"$lt", 30}}}}
+    });
+
+    auto ids = filter->getIdsMatchingFilter(query);
+
+    // Should match 100 (20) and 101 (25), NOT 102 (30)
+    EXPECT_EQ(ids.size(), 2);
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids[0], 100);
+    EXPECT_EQ(ids[1], 101);
+}
+
+TEST_F(FilterTest, LeOperatorInteger) {
+    // Setup: ID 100: age=20, ID 101: age=25, ID 102: age=30, ID 103: age=35
+    filter->add_filters_from_json(100, R"({"age": 20})");
+    filter->add_filters_from_json(101, R"({"age": 25})");
+    filter->add_filters_from_json(102, R"({"age": 30})");
+    filter->add_filters_from_json(103, R"({"age": 35})");
+
+    // Query: age <= 30
+    json query = json::array({
+        {{"age", {{"$le", 30}}}}
+    });
+
+    auto ids = filter->getIdsMatchingFilter(query);
+
+    // Should match 100 (20), 101 (25), and 102 (30)
+    EXPECT_EQ(ids.size(), 3);
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids[0], 100);
+    EXPECT_EQ(ids[1], 101);
+    EXPECT_EQ(ids[2], 102);
+}
+
+TEST_F(FilterTest, LtLeOperatorFloat) {
+    // Setup with float values
+    filter->add_filters_from_json(1, R"({"price": 9.99})");
+    filter->add_filters_from_json(2, R"({"price": 10.5})");
+    filter->add_filters_from_json(3, R"({"price": 15.0})");
+    filter->add_filters_from_json(4, R"({"price": 20.25})");
+
+    // Test $lt
+    json query_lt = json::array({
+        {{"price", {{"$lt", 15.0}}}}
+    });
+    auto ids_lt = filter->getIdsMatchingFilter(query_lt);
+    EXPECT_EQ(ids_lt.size(), 2); // IDs 1, 2
+
+    // Test $le
+    json query_le = json::array({
+        {{"price", {{"$le", 15.0}}}}
+    });
+    auto ids_le = filter->getIdsMatchingFilter(query_le);
+    EXPECT_EQ(ids_le.size(), 3); // IDs 1, 2, 3
+}
+
+TEST_F(FilterTest, LtOperatorEdgeCaseMin) {
+    // Setup
+    filter->add_filters_from_json(1, R"({"value": -2147483648})"); // INT32_MIN
+    filter->add_filters_from_json(2, R"({"value": -2147483647})");
+
+    // Query: value < INT32_MIN
+    json query = json::array({
+        {{"value", {{"$lt", -2147483648}}}}
+    });
+
+    auto ids = filter->getIdsMatchingFilter(query);
+
+    // Should return empty (no value less than min int)
+    EXPECT_EQ(ids.size(), 0);
+}
+
+TEST_F(FilterTest, ComparisonRangeEquivalence) {
+    // Setup
+    filter->add_filters_from_json(1, R"({"age": 20})");
+    filter->add_filters_from_json(2, R"({"age": 25})");
+    filter->add_filters_from_json(3, R"({"age": 30})");
+    filter->add_filters_from_json(4, R"({"age": 35})");
+
+    // Test: $ge 25 AND $le 30 should equal $range [25, 30]
+    json query_comparison = json::array({
+        {{"age", {{"$ge", 25}}}},
+        {{"age", {{"$le", 30}}}}
+    });
+    auto ids_comp = filter->getIdsMatchingFilter(query_comparison);
+
+    json query_range = json::array({
+        {{"age", {{"$range", {25, 30}}}}}
+    });
+    auto ids_range = filter->getIdsMatchingFilter(query_range);
+
+    // Should produce identical results
+    EXPECT_EQ(ids_comp.size(), ids_range.size());
+    std::sort(ids_comp.begin(), ids_comp.end());
+    std::sort(ids_range.begin(), ids_range.end());
+    EXPECT_EQ(ids_comp, ids_range);
 }

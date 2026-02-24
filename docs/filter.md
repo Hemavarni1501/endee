@@ -43,6 +43,108 @@ The database (LMDB) acts as a coarse-grained B+ Tree.
 *   **Split Triggers:** Count > 1024 OR Delta > 65,535.
 *   **Sliding Split:** To ensure Key Uniqueness in LMDB, splits do not strictly occur at the median. The split point "slides" right to find the first value divergence, ensuring `Key(RightBucket) != Key(LeftBucket)`.
 
+### 2.4. Comparison Operators
+
+The system supports four comparison operators for numeric fields, enabling flexible single-boundary range queries:
+
+#### `$gt` - Greater Than (Exclusive)
+Returns documents where the field value is **strictly greater than** the specified value.
+
+**Syntax:**
+```json
+[{"field_name": {"$gt": value}}]
+```
+
+**Supported Types:** Numeric fields only (integers and floats)
+
+**Examples:**
+```json
+// Find users older than 25
+[{"age": {"$gt": 25}}]
+
+// Find products with price greater than 99.99
+[{"price": {"$gt": 99.99}}]
+
+// Combine with other filters: users in NY older than 30
+[
+  {"city": {"$eq": "NY"}},
+  {"age": {"$gt": 30}}
+]
+```
+
+**Implementation:** Uses `range(value+1, UINT32_MAX)` after sortable conversion. Edge case: returns empty bitmap if value equals maximum sortable value.
+
+#### `$ge` - Greater Than or Equal To (Inclusive)
+Returns documents where the field value is **greater than or equal to** the specified value.
+
+**Syntax:**
+```json
+[{"field_name": {"$ge": value}}]
+```
+
+**Supported Types:** Numeric fields only (integers and floats)
+
+**Examples:**
+```json
+// Find users 25 or older
+[{"age": {"$ge": 25}}]
+
+// Find products with price at least 100
+[{"price": {"$ge": 100.0}}]
+```
+
+**Implementation:** Uses `range(value, UINT32_MAX)` after sortable conversion.
+
+#### `$lt` - Less Than (Exclusive)
+Returns documents where the field value is **strictly less than** the specified value.
+
+**Syntax:**
+```json
+[{"field_name": {"$lt": value}}]
+```
+
+**Supported Types:** Numeric fields only (integers and floats)
+
+**Examples:**
+```json
+// Find users younger than 30
+[{"age": {"$lt": 30}}]
+
+// Find products with price less than 100
+[{"price": {"$lt": 100.0}}]
+```
+
+**Implementation:** Uses `range(0, value-1)` after sortable conversion. Edge case: returns empty bitmap if value equals minimum sortable value (0).
+
+#### `$le` - Less Than or Equal To (Inclusive)
+Returns documents where the field value is **less than or equal to** the specified value.
+
+**Syntax:**
+```json
+[{"field_name": {"$le": value}}]
+```
+
+**Supported Types:** Numeric fields only (integers and floats)
+
+**Examples:**
+```json
+// Find users 30 or younger
+[{"age": {"$le": 30}}]
+
+// Find products with price up to 100 (inclusive)
+[{"price": {"$le": 100.0}}]
+
+// Combine: find products between 10 and 100 (inclusive)
+[
+  {"price": {"$ge": 10.0}},
+  {"price": {"$le": 100.0}}
+]
+```
+
+**Implementation:** Uses `range(0, value)` after sortable conversion.
+
+**Note:** All comparison operators work with both positive and negative numbers, including floats. You can combine operators to create precise ranges (e.g., `$ge` + `$le` for inclusive range, `$gt` + `$lt` for exclusive range).
+
 ---
 
 ## 3. Category Filter Design
