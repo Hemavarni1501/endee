@@ -624,7 +624,7 @@ int main(int argc, char** argv) {
                 }
             });
 
-    // Get backup info (reads metadata.json from inside .tar)
+    // Get backup info
     CROW_ROUTE(app, "/api/v1/backups/<string>/info")
             .CROW_MIDDLEWARES(app, AuthMiddleware)
             .methods("GET"_method)([&index_manager, &app](const crow::request& req,
