@@ -637,7 +637,8 @@ extern LIBMDBX_VERINFO_API const struct MDBX_build_info {
 
 /** \brief Print and reset debug MDBX command timing statistics.
  *
- * When `ND_DEBUG` is enabled this prints cumulative per-command MDBX timing
+ * When `ND_MDBX_INSTRUMENT` is enabled this prints cumulative per-command MDBX
+ * timing
  * since the previous call. In non-debug builds this is a no-op. */
 LIBMDBX_API void print_mdbx_stats(void);
 

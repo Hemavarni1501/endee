@@ -1544,7 +1544,7 @@ MDBX_MAYBE_UNUSED static inline uint32_t osal_monotime_to_16dot16_noUnderflow(ui
   return seconds_16dot16 ? seconds_16dot16 : /* fix underflow */ (monotime > 0);
 }
 
-#if defined(ND_DEBUG)
+#if defined(ND_MDBX_INSTRUMENT)
 enum mdbx_debug_stat_cmd {
   mdbx_debug_stat_env_create,
   mdbx_debug_stat_env_open,
@@ -24220,7 +24220,7 @@ __cold static void mdbx_init(void) {
   globals.runtime_flags = ((MDBX_DEBUG) > 0) * MDBX_DBG_ASSERT + ((MDBX_DEBUG) > 1) * MDBX_DBG_AUDIT;
   globals.loglevel = MDBX_LOG_FATAL;
   ENSURE(nullptr, osal_fastmutex_init(&globals.debug_lock) == 0);
-#if defined(ND_DEBUG)
+#if defined(ND_MDBX_INSTRUMENT)
   ENSURE(nullptr, osal_fastmutex_init(&mdbx_debug_stats.lock) == 0);
   mdbx_debug_stats.ready = true;
 #endif
@@ -24240,7 +24240,7 @@ __cold static void mdbx_fini(void) {
   rthc_dtor(current_pid);
   osal_dtor();
   TRACE("<< pid %d\n", current_pid);
-#if defined(ND_DEBUG)
+#if defined(ND_MDBX_INSTRUMENT)
   mdbx_debug_stats.ready = false;
   ENSURE(nullptr, osal_fastmutex_destroy(&mdbx_debug_stats.lock) == 0);
 #endif

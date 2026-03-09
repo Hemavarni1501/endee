@@ -80,6 +80,12 @@ if(ND_DEBUG)
     add_definitions(-DND_DEBUG)
 endif()
 
+# MDBX instrumentation can be enabled independently from ND_DEBUG.
+option(ND_MDBX_INSTRUMENT "Enable MDBX timing instrumentation" OFF)
+if(ND_MDBX_INSTRUMENT)
+    add_definitions(-DND_MDBX_INSTRUMENT)
+endif()
+
 
 # SIMD Optimization Options
 option(USE_AVX512 "Enable AVX512 (F, BW, VNNI, FP16)" OFF)
