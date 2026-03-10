@@ -290,7 +290,7 @@ namespace ndd {
             MDBX_stat stat;
             int rc = mdbx_dbi_stat(txn, blocked_term_postings_dbi_, &stat, sizeof(stat));
             if (rc == MDBX_SUCCESS && stat.ms_entries > 0) {
-                LOG_ERROR("Sparse index database exists but has no superblock. "
+                LOG_ERROR("[" << index_id_ << "] Sparse index database exists but has no superblock. "
                           "This database was created by an older incompatible version.");
                 throw std::runtime_error(
                     "Incompatible sparse index: database has no superblock (legacy format)");
@@ -307,7 +307,7 @@ namespace ndd {
         }
 
         if (sb.format_version != settings::SPARSE_ONDISK_VERSION) {
-            LOG_ERROR("Sparse index format version mismatch: on-disk="
+            LOG_ERROR("[" << index_id_ << "] Sparse index format version mismatch: on-disk="
                       << (int)sb.format_version
                       << " compiled=" << (int)settings::SPARSE_ONDISK_VERSION);
             throw std::runtime_error(
@@ -326,7 +326,7 @@ namespace ndd {
         MDBX_txn* txn = nullptr;
         int rc = mdbx_txn_begin(env_, nullptr, MDBX_TXN_READWRITE, &txn);
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("Failed to begin init transaction: " << mdbx_strerror(rc));
+            LOG_ERROR("[" << index_id_ << "] Failed to begin init transaction: " << mdbx_strerror(rc));
             return false;
         }
 
@@ -335,7 +335,7 @@ namespace ndd {
                             MDBX_CREATE | MDBX_INTEGERKEY,
                             &blocked_term_postings_dbi_);
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("Failed to open blocked_term_postings dbi: " << mdbx_strerror(rc));
+            LOG_ERROR("[" << index_id_ << "] Failed to open blocked_term_postings dbi: " << mdbx_strerror(rc));
             mdbx_txn_abort(txn);
             return false;
         }
@@ -347,7 +347,7 @@ namespace ndd {
 
         rc = mdbx_txn_commit(txn);
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("Failed to commit init transaction: " << mdbx_strerror(rc));
+            LOG_ERROR("[" << index_id_ << "] Failed to commit init transaction: " << mdbx_strerror(rc));
             return false;
         }
 
@@ -464,7 +464,7 @@ namespace ndd {
         MDBX_txn* txn = nullptr;
         int rc = mdbx_txn_begin(env_, nullptr, MDBX_TXN_RDONLY, &txn);
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("Failed to begin search transaction: " << mdbx_strerror(rc));
+            LOG_ERROR("[" << index_id_ << "] Failed to begin search transaction: " << mdbx_strerror(rc));
             return {};
         }
 
@@ -902,11 +902,11 @@ namespace ndd {
             return true;
         }
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("readSuperBlock mdbx_get failed: " << mdbx_strerror(rc));
+            LOG_ERROR("[" << index_id_ << "] readSuperBlock mdbx_get failed: " << mdbx_strerror(rc));
             return false;
         }
         if (data.iov_len < sizeof(SuperBlock)) {
-            LOG_ERROR("readSuperBlock: corrupt superblock (too small)");
+            LOG_ERROR("[" << index_id_ << "] readSuperBlock: corrupt superblock (too small)");
             return false;
         }
 
@@ -922,7 +922,7 @@ namespace ndd {
 
         int rc = mdbx_put(txn, blocked_term_postings_dbi_, &key, &data, MDBX_UPSERT);
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("writeSuperBlock mdbx_put failed: " << mdbx_strerror(rc));
+            LOG_ERROR("[" << index_id_ << "] writeSuperBlock mdbx_put failed: " << mdbx_strerror(rc));
             return false;
         }
         return true;
@@ -959,7 +959,7 @@ namespace ndd {
                                             uint32_t term_id,
                                             const PostingListHeader& header) {
         if (term_id == kMetadataTermId) {
-            LOG_ERROR("Refusing to write posting-list header for reserved metadata term");
+            LOG_ERROR("[" << index_id_ << "] Refusing to write posting-list header for reserved metadata term");
             return false;
         }
 
@@ -969,7 +969,7 @@ namespace ndd {
 
         int rc = mdbx_put(txn, blocked_term_postings_dbi_, &key, &data, MDBX_UPSERT);
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("Failed to write posting-list header for term " << term_id
+            LOG_ERROR("[" << index_id_ << "] Failed to write posting-list header for term " << term_id
                         << ": " << mdbx_strerror(rc));
             return false;
         }
@@ -1013,7 +1013,7 @@ namespace ndd {
 #endif // NDD_INV_IDX_STORE_FLOATS
 
         if (data.iov_len < required) {
-            LOG_ERROR("data is corrupt. Not enough bytes as expected");
+            LOG_ERROR("[" << index_id_ << "] data is corrupt. Not enough bytes as expected");
             return false;
         }
 
@@ -1051,14 +1051,14 @@ namespace ndd {
             return true;
         }
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("loadBlockEntries mdbx_get failed for term " << term_id
+            LOG_ERROR("[" << index_id_ << "] loadBlockEntries mdbx_get failed for term " << term_id
                         << " block " << block_nr << ": " << mdbx_strerror(rc));
             return false;
         }
 
         BlockView view;
         if (!parseBlockViewFromValue(data, block_nr, &view)) {
-            LOG_ERROR("Corrupt block payload for term " << term_id
+            LOG_ERROR("[" << index_id_ << "] Corrupt block payload for term " << term_id
                         << " block " << block_nr);
             return false;
         }
@@ -1104,7 +1104,7 @@ namespace ndd {
                                         float max_val)
     {
         if (term_id == kMetadataTermId || block_nr == kMetadataBlockNr) {
-            LOG_ERROR("saveBlockEntries: Refusing to save reserved metadata key as a data block");
+            LOG_ERROR("[" << index_id_ << "] saveBlockEntries: Refusing to save reserved metadata key as a data block");
             return false;
         }
 
@@ -1113,7 +1113,7 @@ namespace ndd {
         }
 
         if (entries.size() > kBlockCapacity) {
-            LOG_ERROR("Block for term " << term_id << " block " << block_nr
+            LOG_ERROR("[" << index_id_ << "] Block for term " << term_id << " block " << block_nr
                         << " exceeds fixed capacity " << kBlockCapacity);
             return false;
         }
@@ -1145,7 +1145,7 @@ namespace ndd {
         bool has_prev = false;
         for (size_t i = 0; i < entries.size(); i++) {
             if (docToBlockNr(entries[i].doc_id) != block_nr) {
-                LOG_ERROR("Entry doc_id " << entries[i].doc_id
+                LOG_ERROR("[" << index_id_ << "] Entry doc_id " << entries[i].doc_id
                             << " does not belong to term " << term_id
                             << " block " << block_nr);
                 return false;
@@ -1153,7 +1153,7 @@ namespace ndd {
 
             BlockOffset offset = docToBlockOffset(entries[i].doc_id);
             if (has_prev && offset <= prev_offset) {
-                LOG_ERROR("Block entries must be strictly sorted by doc offset");
+                LOG_ERROR("[" << index_id_ << "] Block entries must be strictly sorted by doc offset");
                 return false;
             }
             offsets_out[i] = offset;
@@ -1179,7 +1179,7 @@ namespace ndd {
 
         int rc = mdbx_put(txn, blocked_term_postings_dbi_, &key, &value, MDBX_UPSERT);
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("saveBlockEntries mdbx_put failed for term " << term_id
+            LOG_ERROR("[" << index_id_ << "] saveBlockEntries mdbx_put failed for term " << term_id
                         << " block " << block_nr << ": " << mdbx_strerror(rc));
             return false;
         }
@@ -1278,7 +1278,7 @@ namespace ndd {
         MDBX_txn* txn = nullptr;
         int rc = mdbx_txn_begin(env_, nullptr, MDBX_TXN_RDONLY, &txn);
         if (rc != MDBX_SUCCESS) {
-            LOG_ERROR("Failed to begin transaction for loadTermInfo: " << mdbx_strerror(rc));
+            LOG_ERROR("[" << index_id_ << "] Failed to begin transaction for loadTermInfo: " << mdbx_strerror(rc));
             return false;
         }
 
@@ -1349,7 +1349,7 @@ namespace ndd {
             for (size_t i = 0; i < sparse_vec.indices.size(); i++) {
                 uint32_t term_id = sparse_vec.indices[i];
                 if (term_id == kMetadataTermId) {
-                    LOG_ERROR("term_id UINT32_MAX is reserved for sparse metadata");
+                    LOG_ERROR("[" << index_id_ << "] term_id UINT32_MAX is reserved for sparse metadata");
                     return false;
                 }
                 term_updates[term_id].push_back(std::make_pair(doc_id, sparse_vec.values[i]));
