@@ -45,7 +45,7 @@ jobs:
       # DRY RUN MAKE SURE IT WON'T CHANGE CODE ONLY IT WILL CHECK FORMATTING
       - name: C++ and HPP formatting
         run: |
-          find src/ \( -name "*.cpp" -o -name "*.hpp" \) -not -path "*/third_party/*" | xargs --no-run-if-empty clang-format --dry-run --Werror
+          find src/ \( -name "*.cpp" -o -name "*.hpp" \) | xargs --no-run-if-empty clang-format --dry-run --Werror
 
       # CHECK FOR BUGS AND BAD PRACTICES USING CLANG-TIDY
       - name: C++ Static Analysis
