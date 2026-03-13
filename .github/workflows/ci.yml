@@ -6,12 +6,12 @@ name: Continuous Integration
 
 # ========== TRIGGER EVENT ==========
 on: 
-  # PUSH EVENT  
-  push:
-    branches: [ feature/continuous_integration ]
+  # # PUSH EVENT  
+  # push:
+  #   branches: [ base_ci ]
   # PULL REQUEST EVENT
   pull_request:
-    branches: [ feature/continuous_integration]
+    branches: [ feature/continuous_integration ]
 
   
 # ========== JOBS ==========

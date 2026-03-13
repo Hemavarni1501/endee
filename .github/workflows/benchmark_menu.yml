@@ -16,11 +16,17 @@ name: Benchmark Menu
 # ========================= TRIGGER EVENT =========================
 on:
 
-  # ---- TRIGGER WHEN PREVIOUS WORKFLOW COMPLETED ( PREVIOUS WORKFLOW WAS CONTINUOUS INTEGRATION)
+  # ---- TRIGGER WHEN PREVIOUS WORKFLOW COMPLETED ( PREVIOUS WORKFLOW WAS CONTINUOUS INTEGRATION) 
   workflow_run:
     workflows: [ Continuous Integration ]
     types: [ completed ]
+    branches: [ feature/continuous_integration ]
 
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  statuses: write 
 # ========================= JOBS =========================
 jobs:
 
@@ -118,7 +124,7 @@ jobs:
             core.setOutput('head_sha', headSha);
             core.setOutput('head_ref', headRef);
 
-            # FIND THE OPEN PR WHOSE HEAD MATCHES THIS SHA 
+            // FIND THE OPEN PR WHOSE HEAD MATCHES THIS SHA 
             const { data: prs } = await github.rest.pulls.list({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -167,7 +173,7 @@ jobs:
             const body = [
               `## VectorDB Benchmark - Ready To Run`,
               ``,
-              `> **CI Passed** ([lint + unit tests] (${ ciRunUrl })) - benchmark options unlocked.`,
+              `> **CI Passed** ([lint + unit tests] (${ciRunUrl})) - benchmark options unlocked.`,
               ``,
               `Post one of the command below. Only members with **write access** can trigger runs.`,
               ``,
