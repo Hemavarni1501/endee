@@ -394,6 +394,21 @@ int main(int argc, char** argv) {
                 }
 
                 size_t sparse_dim = body.has("sparse_dim") ? (size_t)body["sparse_dim"].i() : 0;
+                const std::string sparse_scoring_model_str =
+                        body.has("sparse_scoring_model")
+                                ? std::string(body["sparse_scoring_model"].s())
+                                : "default";
+                const auto sparse_scoring_model =
+                        ndd::sparseScoringModelFromString(sparse_scoring_model_str);
+                if(!sparse_scoring_model.has_value()) {
+                    LOG_WARN(1019,
+                             index_id,
+                             "Invalid sparse_scoring_model: " << sparse_scoring_model_str);
+                    return json_error(
+                        400,
+                        "Invalid sparse_scoring_model. Must be one of: default, "
+                        "endee_bm25_server_idf");
+                }
 
                 IndexConfig config{dim,
                                    sparse_dim,
@@ -402,6 +417,7 @@ int main(int argc, char** argv) {
                                    m,
                                    ef_con,
                                    quant_level,
+                                   *sparse_scoring_model,
                                    checksum};
 
                 try {
@@ -695,6 +711,8 @@ int main(int argc, char** argv) {
                              {"dimension", static_cast<int64_t>(metadata.dimension)},
                              {"sparse_dim", static_cast<int64_t>(metadata.sparse_dim)},
                              {"space_type", metadata.space_type_str},
+                             {"sparse_scoring_model",
+                              ndd::sparseScoringModelToString(metadata.sparse_scoring_model)},
                              {"precision", quantLevelToString(metadata.quant_level)},
                              {"total_elements", static_cast<int64_t>(metadata.total_elements)},
                              {"checksum", metadata.checksum},
@@ -1156,6 +1174,8 @@ int main(int argc, char** argv) {
                              {"dimension", static_cast<int64_t>(info->dimension)},
                              {"sparse_dim", static_cast<int64_t>(info->sparse_dim)},
                              {"space_type", info->space_type_str},
+                             {"sparse_scoring_model",
+                              ndd::sparseScoringModelToString(info->sparse_scoring_model)},
                              {"precision", quantLevelToString(info->quant_level)},
                              {"checksum", info->checksum},
                              {"M", static_cast<int64_t>(info->M)},

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
@@ -17,9 +18,13 @@ namespace ndd {
     // inverted index in the same MDBX environment and updates them transactionally.
     class SparseVectorStorage {
     public:
-        SparseVectorStorage(const std::string& db_path, const std::string& index_id) :
+        SparseVectorStorage(const std::string& db_path,
+                            const std::string& index_id,
+                            ndd::SparseScoringModel sparse_scoring_model =
+                                ndd::SparseScoringModel::DEFAULT) :
             db_path_(db_path),
             index_id_(index_id),
+            sparse_scoring_model_(sparse_scoring_model),
             env_(nullptr) {
             sparse_index_ = nullptr;
         }
@@ -32,7 +37,8 @@ namespace ndd {
                 return false;
             }
 
-            sparse_index_ = std::make_unique<InvertedIndex>(env_, 0, index_id_);
+            sparse_index_ =
+                std::make_unique<InvertedIndex>(env_, 0, index_id_, sparse_scoring_model_);
             if(!sparse_index_->initialize()) {
                 return false;
             }
@@ -218,7 +224,8 @@ namespace ndd {
                                                         size_t k,
                                                         const ndd::RoaringBitmap* filter = nullptr)
         {
-            return sparse_index_->search(query, k, filter);
+            return sparse_index_->search(
+                query, k, vector_count_.load(std::memory_order_relaxed), filter);
         }
 
         // Statistics
@@ -228,6 +235,7 @@ namespace ndd {
     private:
         std::string db_path_;
         std::string index_id_;
+        ndd::SparseScoringModel sparse_scoring_model_;
         MDBX_env* env_;
         MDBX_dbi docs_dbi_;
 

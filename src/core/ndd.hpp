@@ -4,6 +4,7 @@
 
 #include "hnsw/hnswlib.h"
 #include "settings.hpp"
+#include "types.hpp"
 #include "id_mapper.hpp"
 #include "vector_storage.hpp"
 #include "../sparse/sparse_storage.hpp"
@@ -37,6 +38,7 @@ struct IndexConfig {
     size_t ef_construction = settings::DEFAULT_EF_CONSTRUCT;
     ndd::quant::QuantizationLevel quant_level =
             ndd::quant::QuantizationLevel::INT8;  // Default to INT8 quantization
+    ndd::SparseScoringModel sparse_scoring_model = ndd::SparseScoringModel::DEFAULT;
     const int32_t checksum;
 };
 
@@ -50,6 +52,7 @@ struct IndexInfo {
     int32_t checksum;
     size_t M;
     size_t ef_con;
+    ndd::SparseScoringModel sparse_scoring_model = ndd::SparseScoringModel::DEFAULT;
 };
 
 struct CacheEntry {
@@ -59,6 +62,7 @@ struct CacheEntry {
     std::shared_ptr<IDMapper> id_mapper;
     std::shared_ptr<VectorStorage> vector_storage;
     std::unique_ptr<ndd::SparseVectorStorage> sparse_storage;
+    ndd::SparseScoringModel sparse_scoring_model = ndd::SparseScoringModel::DEFAULT;
     std::chrono::system_clock::time_point last_access;
     std::chrono::system_clock::time_point last_saved_at;
     std::chrono::system_clock::time_point updated_at;
@@ -79,6 +83,7 @@ struct CacheEntry {
                std::shared_ptr<IDMapper> mapper_,
                std::shared_ptr<VectorStorage> storage_,
                std::unique_ptr<ndd::SparseVectorStorage> sparse_storage_,
+               ndd::SparseScoringModel sparse_scoring_model_,
                std::chrono::system_clock::time_point access_time_) {
         LOG_INFO(2001, index_id_, "Creating cache entry");
 
@@ -105,6 +110,7 @@ struct CacheEntry {
         vector_storage = std::move(storage_);
 
         sparse_storage = std::move(sparse_storage_);
+        sparse_scoring_model = sparse_scoring_model_;
 
         last_access = access_time_;
 
@@ -623,7 +629,8 @@ public:
         std::unique_ptr<ndd::SparseVectorStorage> sparse_storage = nullptr;
         if(config.sparse_dim > 0) {
             std::string sparse_storage_dir = index_dir + "/sparse";
-            sparse_storage = std::make_unique<ndd::SparseVectorStorage>(sparse_storage_dir, index_id);
+            sparse_storage = std::make_unique<ndd::SparseVectorStorage>(
+                sparse_storage_dir, index_id, config.sparse_scoring_model);
             if(!sparse_storage->initialize()) {
                 throw std::runtime_error("Failed to initialize sparse storage");
             }
@@ -662,6 +669,7 @@ public:
                                                            id_mapper,
                                                            vector_storage,
                                                            std::move(sparse_storage),
+                                                           config.sparse_scoring_model,
                                                            std::chrono::system_clock::now()));
             it->second.markUpdated();
             indices_list_.push_front(index_id);
@@ -674,6 +682,7 @@ public:
         metadata_entry.sparse_dim = config.sparse_dim;
         metadata_entry.space_type_str = config.space_type_str;
         metadata_entry.quant_level = config.quant_level;
+        metadata_entry.sparse_scoring_model = config.sparse_scoring_model;
         metadata_entry.checksum = config.checksum;
         metadata_entry.total_elements = 0;
         metadata_entry.M = config.M;
@@ -714,8 +723,10 @@ public:
         // Load metadata to get sparse_dim
         auto metadata = metadata_manager_->getMetadata(index_id);
         size_t sparse_dim = 0;
+        ndd::SparseScoringModel sparse_scoring_model = ndd::SparseScoringModel::DEFAULT;
         if(metadata) {
             sparse_dim = metadata->sparse_dim;
+            sparse_scoring_model = metadata->sparse_scoring_model;
         }
 
         // Step 1: Load HNSW index (automatically adjusts cache based on element count and cache
@@ -737,7 +748,8 @@ public:
         std::unique_ptr<ndd::SparseVectorStorage> sparse_storage;
         if(sparse_dim > 0) {
             std::string sparse_storage_dir = index_dir + "/sparse";
-            sparse_storage = std::make_unique<ndd::SparseVectorStorage>(sparse_storage_dir, index_id);
+            sparse_storage = std::make_unique<ndd::SparseVectorStorage>(
+                sparse_storage_dir, index_id, sparse_scoring_model);
             if(!sparse_storage->initialize()) {
                 throw std::runtime_error("Failed to initialize sparse storage for index: "
                                          + index_id);
@@ -767,6 +779,7 @@ public:
                                                        id_mapper,
                                                        vector_storage,
                                                        std::move(sparse_storage),
+                                                       sparse_scoring_model,
                                                        std::chrono::system_clock::now()));
         indices_list_.push_front(index_id);
 
@@ -1334,8 +1347,8 @@ public:
          * per ranked list and reuse the same weighted RRF accumulation below.
          * TODO: to be received from search API.
          */
-        constexpr float kDenseRrfWeight = 0.5f;
-        constexpr float kSparseRrfWeight = 0.5f;
+        constexpr float kDenseRrfWeight = 0.0f;
+        constexpr float kSparseRrfWeight = 1.0f;
         constexpr float kRrfRankConstant = 60.0f;
         try {
             auto& entry = getIndexEntry(index_id);
@@ -1395,7 +1408,6 @@ public:
 
             // 2. Dense Search (Main Thread)
             std::vector<std::pair<float, ndd::idInt>> dense_results;
-
             if(run_dense_search) {
                 // Convert query to bytes using the wrapper method
                 ndd::quant::QuantizationLevel quant_level = entry.alg->getQuantLevel();
@@ -1630,7 +1642,8 @@ public:
                           entry.alg->getQuantLevel(),
                           entry.alg->getChecksum(),
                           entry.alg->getM(),
-                          entry.alg->getEfConstruction()};
+                          entry.alg->getEfConstruction(),
+                          entry.sparse_scoring_model};
         return indx;
     }
 
@@ -1777,6 +1790,8 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
                            {"sparse_dim", meta->sparse_dim},
                            {"space_type", meta->space_type_str},
                            {"quant_level", static_cast<int>(meta->quant_level)},
+                           {"sparse_scoring_model",
+                            ndd::sparseScoringModelToString(meta->sparse_scoring_model)},
                            {"total_elements", meta->total_elements},
                            {"checksum", meta->checksum}};
             LOG_DEBUG("Metadata prepared for backup: " << metadata_json.dump());
@@ -1930,6 +1945,9 @@ inline std::pair<bool, std::string> IndexManager::restoreBackup(const std::strin
         new_meta.space_type_str = meta_json["params"]["space_type"];
         new_meta.quant_level = static_cast<ndd::quant::QuantizationLevel>(
                 meta_json["params"]["quant_level"].get<int>());
+        new_meta.sparse_scoring_model = ndd::sparseScoringModelFromString(
+            meta_json["params"].value("sparse_scoring_model", std::string("default")))
+                                            .value_or(ndd::SparseScoringModel::DEFAULT);
         new_meta.created_at = std::chrono::system_clock::now();
         new_meta.total_elements = meta_json["params"].value("total_elements", 0ul);
         new_meta.checksum = meta_json["params"].value("checksum", -1);

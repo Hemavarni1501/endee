@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include "log.hpp"
 #include "settings.hpp"
+#include "../core/types.hpp"
 #include "mdbx/mdbx.h"
 #include "quant/common.hpp"
 
@@ -25,6 +26,7 @@ struct IndexMetadata {
     size_t M;
     size_t ef_con;
     std::chrono::system_clock::time_point created_at;
+    ndd::SparseScoringModel sparse_scoring_model = ndd::SparseScoringModel::DEFAULT;
 
     nlohmann::json to_json() const {
         return {{"name", name},
@@ -36,7 +38,9 @@ struct IndexMetadata {
                 {"total_elements", total_elements},
                 {"M", M},
                 {"ef_con", ef_con},
-                {"created_at", std::chrono::system_clock::to_time_t(created_at)}};
+                {"created_at", std::chrono::system_clock::to_time_t(created_at)},
+                {"sparse_scoring_model",
+                 ndd::sparseScoringModelToString(sparse_scoring_model)}};
     }
 
     static IndexMetadata from_json(const nlohmann::json& j) {
@@ -56,6 +60,14 @@ struct IndexMetadata {
         meta.M = j["M"].get<size_t>();
         meta.ef_con = j["ef_con"].get<size_t>();
         meta.created_at = std::chrono::system_clock::from_time_t(j["created_at"].get<time_t>());
+        if(j.contains("sparse_scoring_model")) {
+            const auto sparse_scoring_model = ndd::sparseScoringModelFromString(
+                j["sparse_scoring_model"].get<std::string>());
+            meta.sparse_scoring_model = sparse_scoring_model.value_or(
+                ndd::SparseScoringModel::DEFAULT);
+        } else {
+            meta.sparse_scoring_model = ndd::SparseScoringModel::DEFAULT;
+        }
         return meta;
     }
 };
