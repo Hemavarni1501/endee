@@ -20,6 +20,7 @@
 #include <list>
 #include <algorithm>
 #include <mutex>
+#include <shared_mutex>
 #include <chrono>
 #include <filesystem>
 #include <thread>
@@ -66,10 +67,34 @@ struct CacheEntry {
     std::chrono::system_clock::time_point updated_at;
     // Flag to indicate if the index has been updated
     bool updated{false};
-    // Number of searches performed on this index. For a search with k=10 it will be 10
+
+    /**
+     * Number of searches performed on this index. For a search with k=10
+     * it will be 10
+     *
+     * NOTE: Since there can be multiple readers hitting the same index,
+     * there is no guarantee that this number will capture the true searchCount.
+     * using std::atomics will levy (~10%) performance penalty.
+     */
     size_t searchCount{0};
-    // Per-index operation mutex for coordinating addVectors, saveIndex, deleteVectors
-    std::mutex operation_mutex;
+
+    /**
+     * Per-index reader's - writer's operation lock
+     *
+     * writers: addVectors, saveIndexInternal, saveIndex, deleteVectors,
+     * evictIfNeeded, recoverIndex, deleteVectorsByFilter, updateFilters,
+     * deleteIndex, executeBackupJob
+     *
+     * readers: searchKNN, getVector, getIndexInfo
+     *
+     * NOTE: std::shared_mutex dont guarantee fairness between
+     * readers and writers. ie. currently it could be the case that either
+     * reads or writes can starve if other is being flooded.
+     *
+     * If that is required, we will have to implement a custom reader-writer
+     * locking mechanism with a ticketing system to guarantee fairness.
+     */
+    std::shared_mutex operation_mutex;
 
     // Default constructor required for map
     CacheEntry() :
@@ -326,7 +351,7 @@ private:
         auto& entry = getIndexEntry(index_id);
 
         // Use per-index operation mutex to prevent concurrent operations
-        std::lock_guard<std::mutex> operation_lock(entry.operation_mutex);
+        std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
         // Call internal implementation
         saveIndexInternal(entry);
@@ -400,7 +425,7 @@ public:
             }
 
             try {
-                std::lock_guard<std::mutex> operation_lock(it->second.operation_mutex);
+                std::unique_lock<std::shared_mutex> operation_lock(it->second.operation_mutex);
                 if(it->second.updated) {
                     LOG_INFO(2050, to_evict, "Saving dirty index before eviction");
                     saveIndexInternal(it->second);
@@ -892,7 +917,7 @@ public:
             auto& entry = getIndexEntry(index_id);
 
             // Use per-index operation mutex to prevent concurrent operations
-            std::lock_guard<std::mutex> operation_lock(entry.operation_mutex);
+            std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             // Extract string IDs first
             LOG_DEBUG("Adding " << vectors.size() << " vectors to index " << index_id);
@@ -1107,7 +1132,7 @@ public:
         auto& entry = getIndexEntry(index_id);
 
         // FIX: Use per-index operation mutex to prevent concurrent operations
-        std::lock_guard<std::mutex> operation_lock(entry.operation_mutex);
+        std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
         auto cursor = entry.vector_storage->getCursor();
 
@@ -1177,6 +1202,9 @@ public:
                                                const std::string& str_id) {
         try {
             auto& entry = getIndexEntry(index_id);
+
+            std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
+
             ndd::idInt numeric_id = entry.id_mapper->get_id(str_id);
             if(numeric_id == 0) {
                 return std::nullopt;
@@ -1249,7 +1277,7 @@ public:
             auto& entry = getIndexEntry(index_id);
 
             // Use per-index operation mutex to prevent concurrent operations
-            std::lock_guard<std::mutex> operation_lock(entry.operation_mutex);
+            std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             auto numeric_ids =
                     entry.vector_storage->filter_store_->getIdsMatchingFilter(filter_array);
@@ -1282,7 +1310,7 @@ public:
         try {
             auto& entry = getIndexEntry(index_id);
 
-            std::lock_guard<std::mutex> operation_lock(entry.operation_mutex);
+            std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             size_t updated_count = 0;
             for(const auto& [str_id, new_filter] : updates) {
@@ -1318,7 +1346,7 @@ public:
             auto& entry = getIndexEntry(index_id);
 
             // Use per-index operation mutex to prevent concurrent operations
-            std::lock_guard<std::mutex> operation_lock(entry.operation_mutex);
+            std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             size_t numeric_id = entry.id_mapper->get_id(str_id);
             if(numeric_id == 0) {
@@ -1377,6 +1405,8 @@ public:
         constexpr float kRrfRankConstant = 60.0f;
         try {
             auto& entry = getIndexEntry(index_id);
+            std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
+
             entry.searchCount += k;
 
             const bool run_dense_search = kDenseRrfWeight > 0.0f && !query.empty();
@@ -1613,7 +1643,7 @@ public:
         // Remove from in-memory structures if loaded
         auto it = indices_.find(index_id);
         if(it != indices_.end()) {
-            std::lock_guard<std::mutex> operation_lock(it->second.operation_mutex);
+            std::unique_lock<std::shared_mutex> operation_lock(it->second.operation_mutex);
 
             auto indx_it = std::find(indices_list_.begin(), indices_list_.end(), index_id);
             if(indx_it != indices_list_.end()) {
@@ -1660,6 +1690,7 @@ public:
 
     std::optional<IndexInfo> getIndexInfo(const std::string& index_id) {
         auto& entry = getIndexEntry(index_id);
+        std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
         IndexInfo indx = {entry.alg->getElementsCount(),
                           entry.alg->getDimension(),
                           entry.sparse_model,
@@ -1825,7 +1856,7 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
         auto& entry = getIndexEntry(index_id);
         std::string metadata_file_in_index = source_dir + "/metadata.json";
         {
-            std::lock_guard<std::mutex> operation_lock(entry.operation_mutex);
+            std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
 
             saveIndexInternal(entry);
 
