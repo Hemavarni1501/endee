@@ -60,6 +60,7 @@ struct CacheEntry {
     std::shared_ptr<IDMapper> id_mapper;
     std::shared_ptr<VectorStorage> vector_storage;
     std::unique_ptr<ndd::SparseVectorStorage> sparse_storage;
+    std::unique_ptr<WriteAheadLog> wal;
     std::chrono::system_clock::time_point last_access;
     std::chrono::system_clock::time_point last_saved_at;
     std::chrono::system_clock::time_point updated_at;
@@ -80,6 +81,7 @@ struct CacheEntry {
                std::shared_ptr<IDMapper> mapper_,
                std::shared_ptr<VectorStorage> storage_,
                std::unique_ptr<ndd::SparseVectorStorage> sparse_storage_,
+               std::unique_ptr<WriteAheadLog> wal_,
                std::chrono::system_clock::time_point access_time_) {
         LOG_INFO(2001, index_id_, "Creating cache entry");
 
@@ -106,6 +108,7 @@ struct CacheEntry {
         vector_storage = std::move(storage_);
 
         sparse_storage = std::move(sparse_storage_);
+        wal = std::move(wal_);
 
         last_access = access_time_;
 
@@ -154,36 +157,29 @@ private:
     // Autosave methods
     std::thread autosave_thread_;
     std::atomic<bool> running_{true};
-    // Write-ahead log for each index
-    std::unordered_map<std::string, std::unique_ptr<WriteAheadLog>> wal_logs_;
     BackupStore backup_store_;
     void executeBackupJob(const std::string& index_id, const std::string& backup_name);
 
-    // New methods to handle WAL
-    WriteAheadLog* getOrCreateWAL(const std::string& index_id) {
-        auto it = wal_logs_.find(index_id);
-        if(it != wal_logs_.end()) {
-            return it->second.get();
-        }
-
-        std::string wal_dir = data_dir_ + "/" + index_id;
-        auto wal = std::make_unique<WriteAheadLog>(wal_dir, index_id);
-        auto wal_ptr = wal.get();
-        wal_logs_[index_id] = std::move(wal);
-        return wal_ptr;
+    std::unique_ptr<WriteAheadLog> createWAL(const std::string& index_id) {
+        const std::string wal_dir = data_dir_ + "/" + index_id;
+        return std::make_unique<WriteAheadLog>(wal_dir, index_id);
     }
 
-    void clearWAL(const std::string& index_id) {
-        auto it = wal_logs_.find(index_id);
-        if(it != wal_logs_.end()) {
-            it->second->clear();
+    WriteAheadLog* getOrCreateWAL(CacheEntry& entry) {
+        if(!entry.wal) {
+            entry.wal = createWAL(entry.index_id);
         }
+        return entry.wal.get();
+    }
+
+    void clearWAL(CacheEntry& entry) {
+        getOrCreateWAL(entry)->clear();
     }
 
     // Helper method for WAL recovery
-    void recoverFromWAL(const std::string& index_id) {
-        auto& entry = getIndexEntry(index_id);
-        WriteAheadLog* wal = getOrCreateWAL(index_id);
+    void recoverFromWAL(CacheEntry& entry) {
+        const std::string& index_id = entry.index_id;
+        WriteAheadLog* wal = getOrCreateWAL(entry);
 
         // Check if WAL has entries needing recovery
         if(wal->hasEntries()) {
@@ -374,7 +370,7 @@ private:
         std::filesystem::rename(temp_path, index_path);
 
         // Clear the WAL
-        clearWAL(entry.index_id);
+        clearWAL(entry);
 
         // Update element count in metadata
         if(!metadata_manager_->updateElementCount(entry.index_id, entry.alg->getElementsCount())) {
@@ -534,8 +530,6 @@ public:
             }
             LOG_DEBUG("Shutdown complete");
         }
-        // Clear WAL logs
-        wal_logs_.clear();
     }
 
     // Reset the index file. It does not affect the LMDB or metadata.
@@ -674,8 +668,7 @@ public:
             return vs->get_vectors_batch_into(labels, buffers, success, count);
         });
 
-        // Create WAL during index creation
-        getOrCreateWAL(index_id);
+        auto wal = createWAL(index_id);
 
         // Add to indices with minimal lock scope
         {
@@ -690,6 +683,7 @@ public:
                                                            id_mapper,
                                                            vector_storage,
                                                            std::move(sparse_storage),
+                                                           std::move(wal),
                                                            std::chrono::system_clock::now()));
             it->second.markUpdated();
             indices_list_.push_front(index_id);
@@ -783,6 +777,8 @@ public:
             return vs->get_vectors_batch_into(labels, buffers, success, count);
         });
 
+        auto wal = createWAL(index_id);
+
         LOG_DEBUG("Loaded index: " << index_id);
         LOG_DEBUG("Created space for index: " << index_id);
 
@@ -797,11 +793,12 @@ public:
                                                        id_mapper,
                                                        vector_storage,
                                                        std::move(sparse_storage),
+                                                       std::move(wal),
                                                        std::chrono::system_clock::now()));
         indices_list_.push_front(index_id);
 
         // Handle WAL recovery using the IndexManager's method
-        recoverFromWAL(index_id);
+        recoverFromWAL(it->second);
     }
 
     // Reload index: save (if updated), evict from memory, and reload
@@ -905,7 +902,7 @@ public:
             }
 
             // CRITICAL FIX: Pass WAL to create_ids_batch for atomic logging
-            WriteAheadLog* wal = getOrCreateWAL(index_id);
+            WriteAheadLog* wal = getOrCreateWAL(entry);
 
             std::vector<std::string> str_ids;
             str_ids.reserve(vectors.size());
@@ -1004,7 +1001,7 @@ public:
                                 << " pre-quantized vectors in vector storage");
 
             // Add to write ahead log using IndexManager's method
-            logInsertsAndUpdates(index_id, numeric_ids);
+            logInsertsAndUpdates(entry, numeric_ids);
 
             // Add to HNSW index in parallel using pre-quantized data from QuantVectorObject
             size_t available_threads = settings::NUM_PARALLEL_INSERTS;
@@ -1235,7 +1232,7 @@ public:
                 }
             }
             // Add the list to write ahead log using IndexManager's method
-            logDeletions(entry.index_id, numeric_ids);
+            logDeletions(entry, numeric_ids);
 
             // Mark the index as updated
             entry.markUpdated();
@@ -1260,7 +1257,7 @@ public:
 
             if(deleteVectorsByIds(entry, numeric_ids)) {
                 // Check if we need to save based on WAL entry count after logging
-                WriteAheadLog* wal = getOrCreateWAL(index_id);
+                WriteAheadLog* wal = getOrCreateWAL(entry);
                 if(wal->getEntryCount() >= persistence_config_.save_every_n_updates) {
                     LOG_DEBUG("Saving index " << index_id << " after " << wal->getEntryCount()
                                               << " updates");
@@ -1331,7 +1328,7 @@ public:
 
             // Check if we need to save based on WAL entry count after logging
             if(result) {
-                WriteAheadLog* wal = getOrCreateWAL(index_id);
+                WriteAheadLog* wal = getOrCreateWAL(entry);
                 if(wal->getEntryCount() >= persistence_config_.save_every_n_updates) {
                     LOG_DEBUG("Saving index " << index_id << " after " << wal->getEntryCount()
                                               << " updates");
@@ -1675,10 +1672,9 @@ public:
     }
 
     // Method to log vector additions with both numeric and string IDs
-    void logInsertsAndUpdates(const std::string& index_id,
+    void logInsertsAndUpdates(CacheEntry& entry,
                               const std::vector<std::pair<idInt, bool>>& numeric_ids) {
-
-        WriteAheadLog* wal = getOrCreateWAL(index_id);
+        WriteAheadLog* wal = getOrCreateWAL(entry);
 
         // Create WAL entries for each vector addition
         std::vector<WriteAheadLog::WALEntry> entries;
@@ -1707,8 +1703,8 @@ public:
     }
 
     // Method to log vector deletions (only numeric IDs needed)
-    void logDeletions(const std::string& index_id, const std::vector<idInt>& numeric_ids) {
-        WriteAheadLog* wal = getOrCreateWAL(index_id);
+    void logDeletions(CacheEntry& entry, const std::vector<idInt>& numeric_ids) {
+        WriteAheadLog* wal = getOrCreateWAL(entry);
 
         // Create WAL entries for each vector deletion
         std::vector<WriteAheadLog::WALEntry> entries;
