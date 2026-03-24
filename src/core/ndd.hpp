@@ -2129,6 +2129,20 @@ inline void IndexManager::executeRebuildJob(const std::string& index_id,
             max_elements, space_type, dim, new_M, new_ef_con,
             settings::RANDOM_SEED, quant_level, checksum);
 
+        // Set vector fetcher BEFORE adding vectors — searchBaseLayer during
+        // graph construction needs this to compute distances for base-layer-only
+        // nodes (base layer doesn't store vector data inline)
+        new_alg->setVectorFetcher([vs = entry.vector_storage](ndd::idInt label, uint8_t* buffer) {
+            return vs->get_vector(label, buffer);
+        });
+
+        new_alg->setVectorFetcherBatch([vs = entry.vector_storage](const ndd::idInt* labels,
+                                                                     uint8_t* buffers,
+                                                                     bool* success,
+                                                                     size_t count) -> size_t {
+            return vs->get_vectors_batch_into(labels, buffers, success, count);
+        });
+
         // Iterate VectorStore and re-insert all vectors
         auto cursor = entry.vector_storage->getCursor();
         const size_t batch_size = settings::RECOVERY_BATCH_SIZE;
