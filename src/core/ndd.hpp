@@ -65,8 +65,29 @@ struct CacheEntry {
     std::chrono::system_clock::time_point last_access;
     std::chrono::system_clock::time_point last_saved_at;
     std::chrono::system_clock::time_point updated_at;
+
     // Flag to indicate if the index has been updated
     bool updated{false};
+
+    /**
+     * cache_valid marks whether this CacheEntry is still the active entry
+     * for its index_id.
+     *
+     * This is needed because the per-thread cache stores weak_ptr<CacheEntry>.
+     * A weak_ptr only tells us whether the old CacheEntry object is still alive;
+     * it does not tell us whether that object is still the current entry in
+     * IndexManager::indices_.
+     *
+     * After delete/evict/reload, the old CacheEntry may still remain alive
+     * because in-flight readers still hold shared_ptr references to it. In that
+     * window, weak_ptr.lock() can still succeed. cache_valid prevents new lookups
+     * from reusing that stale entry while allowing existing users of the entry to
+     * finish safely.
+     *
+     * NOTE: This need not be an atomic bool because its a huge performance penalty
+     * and negligible correctness improvement.
+     */
+    bool cache_valid{true};
 
     /**
      * Number of searches performed on this index. For a search with k=10
@@ -178,6 +199,14 @@ class IndexManager {
 private:
     std::deque<std::string> indices_list_;
     std::unordered_map<std::string, std::shared_ptr<CacheEntry>> indices_;
+
+    /**
+     * This is a thread local store(TLS) for the indices_. ie. hot indices
+     * need not look at indices_ and take a global lock repeatedly.
+     * look at getIndexEntry() for more.
+     */
+    inline static thread_local std::unordered_map<std::string, std::weak_ptr<CacheEntry>>
+            per_thread_indices_;
     std::shared_mutex indices_mutex_;
     std::string data_dir_;
     PersistenceConfig persistence_config_;
@@ -336,6 +365,23 @@ private:
      * 2. Else, fetch from disk, make active and then return.
      */
     std::shared_ptr<CacheEntry> getIndexEntry(const std::string& index_id) {
+
+        /**
+         * First check the entry in thread local storage (TLS)
+         * indices_ will be referred only if:
+         * 1. index_id is not found
+         * 2. entry is not pointing to a valid shared_ptr
+         * 3. entry is pointing to a valid shared_ptr but cache_valid == false
+         */
+        auto cached_it = per_thread_indices_.find(index_id);
+        if(cached_it != per_thread_indices_.end()) {
+            auto entry = cached_it->second.lock();
+            if(entry && entry->cache_valid) {
+                return entry;
+            }
+            per_thread_indices_.erase(cached_it);
+        }
+
         /**
          * First check if this index is in memory.
          * A read lock on indices_mutex_ is enough for this.
@@ -344,7 +390,9 @@ private:
             std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
             auto it = indices_.find(index_id);
             if(it != indices_.end()) {
-                return it->second;
+                auto entry = it->second;
+                per_thread_indices_[index_id] = entry;
+                return entry;
             }
         }
 
@@ -363,7 +411,9 @@ private:
             if(it == indices_.end()) {
                 throw std::runtime_error("[ERROR] Index " + index_id + " doesnt exist.");
             }
-            return it->second;
+            auto entry = it->second;
+            per_thread_indices_[index_id] = entry;
+            return entry;
         }
     }
 
@@ -473,6 +523,7 @@ public:
             }
 
             LOG_INFO(2016, to_evict, "Evicting clean index from cache");
+            it->second->cache_valid = false;
             indices_.erase(it);
             indices_list_.pop_back();
             --max_attempts;
@@ -853,6 +904,7 @@ public:
                     if(list_it != indices_list_.end()) {
                         indices_list_.erase(list_it);
                     }
+                    it->second->cache_valid = false;
                     indices_.erase(it);
                     LOG_INFO(2024, index_id, "Evicted index from cache");
                 }
@@ -1668,6 +1720,7 @@ public:
         auto it = indices_.find(index_id);
         if(it != indices_.end()) {
             auto entry = it->second;
+            entry->cache_valid = false;
             std::unique_lock<std::shared_mutex> operation_lock(entry->operation_mutex);
 
             auto indx_it = std::find(indices_list_.begin(), indices_list_.end(), index_id);
