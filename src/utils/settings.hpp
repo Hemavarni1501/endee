@@ -91,6 +91,7 @@ namespace settings {
      * Look at docs/memory_management.md
      */
     constexpr size_t MAX_LIVE_INDICES = 255;
+    // constexpr float MAX_ANON_MEM = 60; //A percentage of total memory
 
     constexpr bool DEFAULT_ENABLE_DEBUG_LOG = true;
     const std::string DEFAULT_AUTH_TOKEN = "";

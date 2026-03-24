@@ -180,8 +180,6 @@ private:
     std::unordered_map<std::string, std::shared_ptr<CacheEntry>> indices_;
     std::shared_mutex indices_mutex_;
     std::string data_dir_;
-    // This is for locking the LRU
-    std::shared_mutex active_indices_mutex_;
     PersistenceConfig persistence_config_;
     std::atomic<bool> shutdown_requested_{false};
     std::condition_variable persistence_cv_;
