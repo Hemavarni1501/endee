@@ -64,7 +64,7 @@ All parameters are optional. Omitted parameters retain their current values.
 }
 ```
 
-When no rebuild is active, `status` is `"idle"`.
+Status is per-index — querying a different index than the one being rebuilt returns `"idle"`. When no rebuild is active for this index, `status` is `"idle"`.
 
 ---
 
@@ -84,5 +84,5 @@ The following parameters **cannot** be changed via rebuild (returns 400):
 - **Write operations** (insert, delete, update) will block and timeout while the rebuild is running, same as during backup.
 - **One rebuild at a time per user** — cannot start a rebuild on any index while another rebuild is in progress for the same user. Also cannot run concurrently with a backup.
 - **Periodic checkpoints** — the in-progress graph is saved to a temp file at regular intervals.
-- **On completion**, the new graph is saved as a timestamped file (e.g., `default.idx.1710745200`) which is kept permanently, then copied to `default.idx`.
+- **On completion**, the new graph replaces `default.idx`. All temporary and intermediate files are cleaned up.
 - **On server restart** during an incomplete rebuild, the old index loads normally. Temp files are cleaned up automatically. The rebuild must be restarted manually.
