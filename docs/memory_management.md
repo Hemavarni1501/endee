@@ -45,6 +45,15 @@ Each live dense index opens multiple MDBX environments, each with a large config
 | filter store | 64 GiB |
 | sparse storage | 1 TiB |
 
+These are the default configured maxima. In `settings.hpp`, both the initial/current map size and
+the maximum map size are runtime-configurable through environment variables such as:
+`NDD_INDEX_META_MAP_SIZE_BITS`, `NDD_INDEX_META_MAP_SIZE_MAX_BITS`,
+`NDD_ID_MAPPER_MAP_SIZE_BITS`, `NDD_ID_MAPPER_MAP_SIZE_MAX_BITS`,
+`NDD_FILTER_MAP_SIZE_BITS`, `NDD_FILTER_MAP_SIZE_MAX_BITS`,
+`NDD_METADATA_MAP_SIZE_BITS`, `NDD_METADATA_MAP_SIZE_MAX_BITS`,
+`NDD_VECTOR_MAP_SIZE_BITS`, `NDD_VECTOR_MAP_SIZE_MAX_BITS`, and
+`NDD_SPARSE_MAP_SIZE_MAX_BITS`.
+
 That is about 5.57 TiB of configured MDBX map capacity for a live index with sparse storage
 enabled. For a dense-only index, the total is about 4.57 TiB. There is also one global metadata
 environment for index metadata with a 128 MiB upper bound.
