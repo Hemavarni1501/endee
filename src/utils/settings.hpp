@@ -83,8 +83,10 @@ namespace settings {
     /**
      * Look at docs/memory_management.md
      * XXX: DO NOT CHANGE THIS
+     * DEFAULT_MAX_LIVE_INDICES can only be upto 255
+     * because of PTHREAD_KEYS_MAX limit
      */
-    constexpr size_t DEFAULT_MAX_LIVE_INDICES = 255;
+    constexpr size_t DEFAULT_MAX_LIVE_INDICES = 100;
     // constexpr float MAX_ANON_MEM = 60; //A percentage of total memory
 
     constexpr bool DEFAULT_ENABLE_DEBUG_LOG = true;
@@ -257,28 +259,108 @@ namespace settings {
     inline std::string validateSettings() {
         std::string error;
 
-        auto appendValidationError = [&error](const char* env_name,
-                                              size_t actual_value,
-                                              const char* default_name,
-                                              size_t default_value) {
-            if(!error.empty()) {
-                error += "; ";
-            }
-            error += env_name;
+        auto appendComparisonError = [&error](const char* lhs_name,
+                                              size_t lhs_value,
+                                              const char* comparison_text,
+                                              const char* rhs_name,
+                                              size_t rhs_value)
+        {
+            error += "\n";
+            error += lhs_name;
+            error += "(";
+            error += std::to_string(lhs_value);
+            error += ") ";
+            error += comparison_text;
+            error += " ";
+            error += rhs_name;
             error += " (";
-            error += std::to_string(actual_value);
-            error += ") exceeds ";
-            error += default_name;
-            error += " (";
-            error += std::to_string(default_value);
+            error += std::to_string(rhs_value);
             error += ")";
         };
 
         if(MAX_LIVE_INDICES > DEFAULT_MAX_LIVE_INDICES) {
-            appendValidationError("NDD_MAX_LIVE_INDICES",
+            appendComparisonError("NDD_MAX_LIVE_INDICES",
                                   MAX_LIVE_INDICES,
+                                  "exceeds",
                                   "DEFAULT_MAX_LIVE_INDICES",
                                   DEFAULT_MAX_LIVE_INDICES);
+        }
+        if(INDEX_META_MAP_SIZE_BITS >= INDEX_META_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_INDEX_META_MAP_SIZE_BITS",
+                                  INDEX_META_MAP_SIZE_BITS,
+                                  "must be less than",
+                                  "NDD_INDEX_META_MAP_SIZE_MAX_BITS",
+                                  INDEX_META_MAP_SIZE_MAX_BITS);
+        }
+        if(ID_MAPPER_MAP_SIZE_BITS >= ID_MAPPER_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_ID_MAPPER_MAP_SIZE_BITS",
+                                  ID_MAPPER_MAP_SIZE_BITS,
+                                  "must be less than",
+                                  "NDD_ID_MAPPER_MAP_SIZE_MAX_BITS",
+                                  ID_MAPPER_MAP_SIZE_MAX_BITS);
+        }
+        if(FILTER_MAP_SIZE_BITS >= FILTER_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_FILTER_MAP_SIZE_BITS",
+                                  FILTER_MAP_SIZE_BITS,
+                                  "must be less than",
+                                  "NDD_FILTER_MAP_SIZE_MAX_BITS",
+                                  FILTER_MAP_SIZE_MAX_BITS);
+        }
+        if(METADATA_MAP_SIZE_BITS >= METADATA_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_METADATA_MAP_SIZE_BITS",
+                                  METADATA_MAP_SIZE_BITS,
+                                  "must be less than",
+                                  "NDD_METADATA_MAP_SIZE_MAX_BITS",
+                                  METADATA_MAP_SIZE_MAX_BITS);
+        }
+        if(VECTOR_MAP_SIZE_BITS >= VECTOR_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_VECTOR_MAP_SIZE_BITS",
+                                  VECTOR_MAP_SIZE_BITS,
+                                  "must be less than",
+                                  "NDD_VECTOR_MAP_SIZE_MAX_BITS",
+                                  VECTOR_MAP_SIZE_MAX_BITS);
+        }
+        if(INDEX_META_MAP_SIZE_MAX_BITS > DEFAULT_INDEX_META_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_INDEX_META_MAP_SIZE_MAX_BITS",
+                                  INDEX_META_MAP_SIZE_MAX_BITS,
+                                  "exceeds",
+                                  "DEFAULT_INDEX_META_MAP_SIZE_MAX_BITS",
+                                  DEFAULT_INDEX_META_MAP_SIZE_MAX_BITS);
+        }
+        if(ID_MAPPER_MAP_SIZE_MAX_BITS > DEFAULT_ID_MAPPER_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_ID_MAPPER_MAP_SIZE_MAX_BITS",
+                                  ID_MAPPER_MAP_SIZE_MAX_BITS,
+                                  "exceeds",
+                                  "DEFAULT_ID_MAPPER_MAP_SIZE_MAX_BITS",
+                                  DEFAULT_ID_MAPPER_MAP_SIZE_MAX_BITS);
+        }
+        if(FILTER_MAP_SIZE_MAX_BITS > DEFAULT_FILTER_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_FILTER_MAP_SIZE_MAX_BITS",
+                                  FILTER_MAP_SIZE_MAX_BITS,
+                                  "exceeds",
+                                  "DEFAULT_FILTER_MAP_SIZE_MAX_BITS",
+                                  DEFAULT_FILTER_MAP_SIZE_MAX_BITS);
+        }
+        if(METADATA_MAP_SIZE_MAX_BITS > DEFAULT_METADATA_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_METADATA_MAP_SIZE_MAX_BITS",
+                                  METADATA_MAP_SIZE_MAX_BITS,
+                                  "exceeds",
+                                  "DEFAULT_METADATA_MAP_SIZE_MAX_BITS",
+                                  DEFAULT_METADATA_MAP_SIZE_MAX_BITS);
+        }
+        if(VECTOR_MAP_SIZE_MAX_BITS > DEFAULT_VECTOR_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_VECTOR_MAP_SIZE_MAX_BITS",
+                                  VECTOR_MAP_SIZE_MAX_BITS,
+                                  "exceeds",
+                                  "DEFAULT_VECTOR_MAP_SIZE_MAX_BITS",
+                                  DEFAULT_VECTOR_MAP_SIZE_MAX_BITS);
+        }
+        if(SPARSE_MAP_SIZE_MAX_BITS > DEFAULT_SPARSE_MAP_SIZE_MAX_BITS) {
+            appendComparisonError("NDD_SPARSE_MAP_SIZE_MAX_BITS",
+                                  SPARSE_MAP_SIZE_MAX_BITS,
+                                  "exceeds",
+                                  "DEFAULT_SPARSE_MAP_SIZE_MAX_BITS",
+                                  DEFAULT_SPARSE_MAP_SIZE_MAX_BITS);
         }
         return error;
     }
