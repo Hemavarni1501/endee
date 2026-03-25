@@ -874,6 +874,10 @@ int main(int argc, char** argv) {
                      }
                 }
 
+                float dense_rrf_weight = body.has("dense_rrf_weight") ? (float)body["dense_rrf_weight"].d() : 0.5f;
+                float sparse_rrf_weight = 1.0f - dense_rrf_weight;
+                float rrf_rank_constant = body.has("rrf_rank_constant") ? (float)body["rrf_rank_constant"].d() : 60.0f;
+                
                 LOG_DEBUG("Filter: " << filter_array.dump());
                 try {
                     auto search_response = index_manager.searchKNN(index_id,
@@ -884,7 +888,10 @@ int main(int argc, char** argv) {
                                                                     filter_array,
                                                                     filter_params,
                                                                     include_vectors,
-                                                                    ef);
+                                                                    ef,
+                                                                    dense_rrf_weight,
+                                                                    sparse_rrf_weight,
+                                                                    rrf_rank_constant);
 
                     if(!search_response) {
                         LOG_WARN(1038, ctx.username, index_name, "Search request returned no results because the index is missing or search failed");
