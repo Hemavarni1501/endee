@@ -114,8 +114,8 @@ In practice, that means eviction is closer to "oldest loaded/created live index 
 ## TODO
 
 1. There is no DRAM-based admission or eviction policy yet. `MAX_ANON_MEM` is only a commented
-   placeholder, and `MAX_MEMORY_GB` is currently logged at startup but not enforced. In practice,
-   the usable memory ceiling should be computed at startup from the effective deployment limit:
+   placeholder. In practice, the usable memory ceiling should be computed at startup from the
+   effective deployment limit:
    cgroup limits, container limits, and host/server memory limits. The way this is discovered will
    also be OS-specific, with different logic needed for Linux and macOS.
 2. `MAX_LIVE_INDICES` is a fixed compile-time constant. A better implementation would derive a

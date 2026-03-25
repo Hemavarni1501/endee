@@ -13,15 +13,11 @@ constexpr uint64_t TB = (1024ULL * GB);
 
 namespace settings {
     // === Compile-time constants ===
-    // For strings we use inline const and not constexpr. Some compilers
-    // do not support constexpr for std::string
-    inline const std::string NAME = "Endee";
     inline const std::string VERSION = "1.1.0";
     inline uint16_t INDEX_VERSION = 1;
     inline uint16_t SPARSE_ONDISK_VERSION = 1;
     inline const std::string DEFAULT_SPACE_TYPE = "cosine";
-    constexpr size_t DEFAULT_STORAGE_BITS =
-            16;  // 16 bits = 2 bytes per element. Only for dense vectors
+
     constexpr size_t MIN_DIMENSION = 2;
     constexpr size_t MAX_DIMENSION = 16'384;
     constexpr size_t DEFAULT_M = 16;
@@ -41,8 +37,6 @@ namespace settings {
     constexpr size_t AUTOSAVE_SLEEP_MINUTES = 5;
     // Number of threads for http server - 0 means it will default to hardware concurrency
     constexpr size_t DEFAULT_NUM_SERVER_THREADS = 0;
-    // Number of save mutexes for parallel saves
-    constexpr size_t NUM_INDEX_SAVE_MUTEXES = 16;
 
     // MDBX default map sizes. Growth step and initial size are the same for all databases.
     // System tables
@@ -303,7 +297,6 @@ namespace settings {
         oss << "PREFILTER_CARDINALITY_THRESHOLD: " << PREFILTER_CARDINALITY_THRESHOLD << "\n";
         oss << "NUM_PARALLEL_INSERTS: " << NUM_PARALLEL_INSERTS << "\n";
         oss << "NUM_RECOVERY_THREADS: " << NUM_RECOVERY_THREADS << "\n";
-        oss << "MAX_MEMORY_GB: " << MAX_MEMORY_GB << "\n";
         oss << "ENABLE_DEBUG_LOG: " << (ENABLE_DEBUG_LOG ? "true" : "false") << "\n";
         oss << "AUTH_ENABLED: " << (AUTH_ENABLED ? "true" : "false") << "\n";
         oss << "DEFAULT_USERNAME: " << DEFAULT_USERNAME << "\n";
