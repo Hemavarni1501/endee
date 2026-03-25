@@ -607,7 +607,7 @@ public:
             }
             for(const auto& index_id : indices_to_save) {
                 try {
-                    LOG_DEBUG("Saving dirty index " << index_id << " during shutdown");
+                    LOG_INFO(2017, index_id, "Saving dirty index during shutdown");
                     saveIndex(index_id);
                 } catch(const std::exception& e) {
                     LOG_ERROR(2017,
@@ -893,7 +893,7 @@ public:
                 std::shared_lock<std::shared_mutex> lock(indices_mutex_);
                 auto it = indices_.find(index_id);
                 if(it != indices_.end() && it->second && it->second->is_dirty) {
-                    LOG_DEBUG("Saving dirty index before reload: " << index_id);
+                    LOG_INFO(2023, index_id, "Saving dirty index before reload");
                     saveIndex(index_id);
                 }
             }
