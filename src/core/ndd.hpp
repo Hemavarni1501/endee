@@ -1344,10 +1344,11 @@ public:
                 bool include_vectors = false,
                 size_t ef = 128 ,
                 float kDenseRrfWeight = 0.5f,
-                float kSparseRrfWeight = 0.5f,
                 float kRrfRankConstant = 60)
     {
         try {
+            const float kSparseRrfWeight = 1.0f - kDenseRrfWeight;
+            LOG_DEBUG("SPARSE_RRF_WEIGHT" << kSparseRrfWeight);
             auto& entry = getIndexEntry(index_id);
             entry.searchCount += k;
             const bool run_dense_search = kDenseRrfWeight > 0.0f && !query.empty();

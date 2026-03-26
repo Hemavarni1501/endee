@@ -888,7 +888,6 @@ int main(int argc, char** argv) {
                                                                     include_vectors,
                                                                     ef,
                                                                     dense_rrf_weight,
-                                                                    1.0f - dense_rrf_weight,
                                                                     rrf_rank_constant);
 
                     if(!search_response) {
