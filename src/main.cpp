@@ -879,6 +879,9 @@ int main(int argc, char** argv) {
                     return json_error(400, "dense_rrf_weight must be between 0 and 1");
                 }
                 float rrf_rank_constant = body.has("rrf_rank_constant") ? (float)body["rrf_rank_constant"].d() : settings::DEFAULT_RRF_RANK_CONSTANT;
+                if(rrf_rank_constant<=0.0f){
+                    return json_error(400, "rrf_rank_constant must be greater than 0");
+                }
                 LOG_DEBUG("Filter: " << filter_array.dump());
                 try {
                     auto search_response = index_manager.searchKNN(index_id,
