@@ -1983,7 +1983,9 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
 
         // Check stop_token before expensive operations
         if (st.stop_requested()) {
-            throw std::runtime_error("Backup aborted: server shutting down");
+            LOG_INFO(2046, index_id, "Backup cancelled");
+            backup_store_.clearActiveBackup(username);
+            return;
         }
 
         auto entry_ptr = getIndexEntry(index_id);
@@ -2002,7 +2004,9 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
 
             // Check again after acquiring lock (shutdown may have been requested while waiting)
             if (st.stop_requested()) {
-                throw std::runtime_error("Backup aborted: server shutting down");
+                LOG_INFO(2047, index_id, "Backup cancelled");
+                backup_store_.clearActiveBackup(username);
+                return;
             }
 
             saveIndexInternal(entry);
@@ -2193,8 +2197,6 @@ inline std::pair<bool, std::string> IndexManager::createBackupAsync(const std::s
     if (std::filesystem::exists(backup_tar)) {
         return {false, "Backup already exists: " + backup_name};
     }
-
-    (void)getIndexEntry(index_id);
 
     std::jthread t([this, index_id, backup_name](std::stop_token st) {
         executeBackupJob(index_id, backup_name, st);
