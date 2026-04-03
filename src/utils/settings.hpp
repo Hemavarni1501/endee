@@ -74,6 +74,11 @@ namespace settings {
     //minimum bytes in filesystem before triggering out of storage sequence
     constexpr size_t MINIMUM_REQUIRED_FS_BYTES = (1 * GB);
 
+    // System sanity check thresholds
+    constexpr size_t DEFAULT_MINIMUM_REQUIRED_DRAM_MB = (10 * 1024);  // 10 GB in MB
+    constexpr size_t MINIMUM_OPEN_FILES = 5000;
+    constexpr size_t DEFAULT_MINIMUM_CPU_CORES = 2;
+
     // Buffer for early exit in search base layer
     constexpr int EARLY_EXIT_BUFFER_INSERT = 16;
     constexpr int EARLY_EXIT_BUFFER_QUERY = 8;
@@ -194,6 +199,12 @@ namespace settings {
     inline static size_t NUM_RECOVERY_THREADS = [] {
         const char* env = std::getenv("NDD_NUM_RECOVERY_THREADS");
         return env ? std::stoull(env) : DEFAULT_NUM_RECOVERY_THREADS;
+    }();
+
+    // Minimum available DRAM in MB (configurable via NDD_MIN_DRAM_MB)
+    inline static size_t MINIMUM_REQUIRED_DRAM_MB = [] {
+        const char* env = std::getenv("NDD_MIN_DRAM_MB");
+        return env ? std::stoull(env) : DEFAULT_MINIMUM_REQUIRED_DRAM_MB;
     }();
 
     inline static bool ENABLE_DEBUG_LOG = [] {
@@ -388,6 +399,8 @@ namespace settings {
         oss << "ENABLE_DEBUG_LOG: " << (ENABLE_DEBUG_LOG ? "true" : "false") << "\n";
         oss << "AUTH_ENABLED: " << (AUTH_ENABLED ? "true" : "false") << "\n";
         oss << "DEFAULT_USERNAME: " << DEFAULT_USERNAME << "\n";
+        oss << "MINIMUM_REQUIRED_DRAM_MB: " << MINIMUM_REQUIRED_DRAM_MB << "\n";
+        oss << "MINIMUM_OPEN_FILES: " << MINIMUM_OPEN_FILES << "\n";
         oss << "\n=== MDBX Map Sizes (bit shifts) ===\n";
         oss << "INDEX_META_MAP_SIZE_BITS: " << INDEX_META_MAP_SIZE_BITS << "\n";
         oss << "INDEX_META_MAP_SIZE_MAX_BITS: " << INDEX_META_MAP_SIZE_MAX_BITS << "\n";

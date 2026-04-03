@@ -37,8 +37,6 @@
 #include "core/ndd.hpp"
 #include "auth.hpp"
 #include "quant/common.hpp"
-#include "cpu_compat_check/check_avx_compat.hpp"
-#include "cpu_compat_check/check_arm_compat.hpp"
 #include "system_sanity/system_sanity.hpp"
 
 using ndd::quant::quantLevelToString;
@@ -143,32 +141,6 @@ inline nlohmann::ordered_json make_index_info_payload(const IndexInfo& info) {
     return payload;
 }
 
-/**
- * Checks if the CPU is compatible with all
- * the instruction sets being used for x86, ARM and MAC Mxx
- */
-bool is_cpu_compatible() {
-    bool ret = true;
-
-#if defined(USE_AVX2) && (defined(__x86_64__) || defined(_M_X64))
-    ret &= is_avx2_compatible();
-#endif  //AVX2 checks
-
-#if defined(USE_AVX512) && (defined(__x86_64__) || defined(_M_X64))
-    ret &= is_avx512_compatible();
-#endif  //AVX512 checks
-
-#if defined(USE_NEON)
-    ret &= is_neon_compatible();
-#endif
-
-#if defined(USE_SVE2)
-    ret &= is_sve2_compatible();
-#endif
-
-    return ret;
-}
-
 // Read file contents
 std::string read_file(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
@@ -234,9 +206,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if(!is_cpu_compatible()) {
-        LOG_ERROR(1004, "CPU is not compatible; server startup aborted");
-        return 0;
+    if(!run_startup_sanity_checks()) {
+        LOG_ERROR(1799, "Server startup aborted due to failed sanity checks");
+        return 1;
     }
 
     LOG_INFO("SERVER_ID: " << settings::SERVER_ID);
@@ -254,6 +226,7 @@ int main(int argc, char** argv) {
     LOG_INFO("DEFAULT_MAX_ELEMENTS_INCREMENT: " << settings::DEFAULT_MAX_ELEMENTS_INCREMENT);
     LOG_INFO("DEFAULT_MAX_ELEMENTS_INCREMENT_TRIGGER: "
                 << settings::DEFAULT_MAX_ELEMENTS_INCREMENT_TRIGGER);
+    LOG_INFO("MINIMUM_REQUIRED_DRAM_MB: " << settings::MINIMUM_REQUIRED_DRAM_MB);
 
     // Path to React build directory
     // Get the executable's directory and resolve frontend/dist relative to it
@@ -264,7 +237,6 @@ int main(int argc, char** argv) {
 
     // Initialize index manager with persistence config
     std::string data_dir = settings::DATA_DIR;
-    std::filesystem::create_directories(data_dir);
 
     PersistenceConfig persistence_config{
             settings::SAVE_EVERY_N_UPDATES,                        // Save every n updates

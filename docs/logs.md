@@ -87,7 +87,7 @@ The same overload shapes apply to `LOG_WARN` and `LOG_ERROR`.
   - `1400s` WAL logs
   - `1500s` metadata logs
   - `1600s` vector storage logs
-  - `1700s` CPU compatibility logs
+  - `1700s` system sanity checks (CPU compatibility, disk, memory, ulimits)
   - `2000s` index manager logs
   - `2100s` HNSW load/cache logs
 

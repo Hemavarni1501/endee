@@ -1,39 +1,313 @@
 #include <iostream>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <fstream>
+#include <string>
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <limits.h>
+#include <filesystem>
+#include <thread>
+
 #include <sys/statvfs.h>
 #include <sys/stat.h>
-#include <time.h>
-#include <stdio.h>
-#include <stddef.h>
-#include <limits.h>
+#include <sys/resource.h>
+#include <unistd.h>
+
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
 #include "utils/settings.hpp"
 #include "utils/log.hpp"
+#include "utils/cpu_compat_check/check_avx_compat.hpp"
+#include "utils/cpu_compat_check/check_arm_compat.hpp"
+#include "utils/system_sanity/system_sanity.hpp"
 
-size_t get_remaining_storage(const char *folder_path) {
+static bool is_cpu_compatible() {
+    bool ret = true;
+
+#if defined(USE_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    ret &= is_avx2_compatible();
+#endif  //AVX2 checks
+
+#if defined(USE_AVX512) && (defined(__x86_64__) || defined(_M_X64))
+    ret &= is_avx512_compatible();
+#endif  //AVX512 checks
+
+#if defined(USE_NEON)
+    ret &= is_neon_compatible();
+#endif
+
+#if defined(USE_SVE2)
+    ret &= is_sve2_compatible();
+#endif
+
+    return ret;
+}
+
+bool check_cpu_compatibility() {
+    if(!is_cpu_compatible()) {
+        LOG_ERROR(1739, "CPU is not compatible with required instruction sets");
+        return false;
+    }
+    LOG_INFO(1738, "CPU compatibility check passed");
+    return true;
+}
+
+// ============================================================================
+// Disk space
+// ============================================================================
+
+static size_t get_remaining_storage(const char *folder_path) {
     struct statvfs vfs;
 
     if (!folder_path || statvfs(folder_path, &vfs) != 0) {
-        perror("get_remaining_storage: statvfs");
+        LOG_ERROR(1747, "statvfs failed for " << (folder_path ? folder_path : "(null)"));
         return SIZE_MAX;  // error sentinel
     }
-
-    // printf("%s: remaining space in %s is %zu bytes\n", __func__, folder_path, (size_t)vfs.f_bavail * (size_t)vfs.f_frsize);
 
     return (size_t)vfs.f_bavail * (size_t)vfs.f_frsize;
 }
 
-
-/**
- * This returns true if the disk is considered full.
- */
 bool is_disk_full(){
     size_t remaining_size = get_remaining_storage(settings::DATA_DIR.c_str());
 
     if(remaining_size < settings::MINIMUM_REQUIRED_FS_BYTES){
-        LOG_INFO("Remining storage in " + settings::DATA_DIR + " is : " + std::to_string(remaining_size/MB) + " MB");
+        LOG_INFO("Remaining storage in " + settings::DATA_DIR + " is : " + std::to_string(remaining_size/MB) + " MB");
         return true;
     }
     return false;
+}
+
+bool check_disk_space() {
+    if(is_disk_full()) {
+        LOG_ERROR(1746, "Insufficient disk space in " << settings::DATA_DIR
+                  << "; need at least " << settings::MINIMUM_REQUIRED_FS_BYTES / GB << " GB");
+        return false;
+    }
+    size_t remaining = get_remaining_storage(settings::DATA_DIR.c_str());
+    LOG_INFO(1745, "Disk space check passed: " << remaining / MB << " MB available in " << settings::DATA_DIR);
+    return true;
+}
+
+// ============================================================================
+// DATA_DIR permissions
+// ============================================================================
+
+bool check_data_dir_permissions() {
+    if(!std::filesystem::exists(settings::DATA_DIR)) {
+        std::error_code ec;
+        std::filesystem::create_directories(settings::DATA_DIR, ec);
+        if(ec) {
+            LOG_ERROR(1743, "Cannot create DATA_DIR: " << settings::DATA_DIR
+                      << " (" << ec.message() << ")");
+            return false;
+        }
+        LOG_INFO(1740, "Created DATA_DIR: " << settings::DATA_DIR);
+    }
+
+    if(!std::filesystem::is_directory(settings::DATA_DIR)) {
+        LOG_ERROR(1741, "DATA_DIR is not a directory: " << settings::DATA_DIR);
+        return false;
+    }
+
+    if(access(settings::DATA_DIR.c_str(), R_OK | W_OK) != 0) {
+        LOG_ERROR(1742, "DATA_DIR is not readable/writable: " << settings::DATA_DIR);
+        return false;
+    }
+
+    LOG_INFO(1744, "DATA_DIR permissions check passed: " << settings::DATA_DIR);
+    return true;
+}
+
+// ============================================================================
+// Available memory (cgroup-aware)
+// ============================================================================
+
+/**
+ * Try to read a single numeric value from a file.
+ * Returns 0 on failure (file doesn't exist, can't parse, or value is "max").
+ */
+static size_t read_cgroup_value(const char* path) {
+    std::ifstream f(path);
+    if(!f.is_open()) return 0;
+
+    std::string line;
+    if(!std::getline(f, line)) return 0;
+
+    // cgroup v2 memory.max can be "max" meaning unlimited
+    if(line == "max") return 0;
+
+    try {
+        return std::stoull(line);
+    } catch(...) {
+        return 0;
+    }
+}
+
+/**
+ * Get available memory in bytes, respecting cgroup limits.
+ *
+ * Priority:
+ *   1. cgroup v2 (memory.max - memory.current)
+ *   2. cgroup v1 (memory.limit_in_bytes - memory.usage_in_bytes)
+ *   3. Host memory (macOS: host_statistics64, Linux: /proc/meminfo MemAvailable)
+ */
+static size_t get_available_memory_bytes(std::string& source) {
+    // Try cgroup v2
+    size_t cg2_limit = read_cgroup_value("/sys/fs/cgroup/memory.max");
+    if(cg2_limit > 0) {
+        size_t cg2_usage = read_cgroup_value("/sys/fs/cgroup/memory.current");
+        source = "cgroup v2";
+        return (cg2_limit > cg2_usage) ? (cg2_limit - cg2_usage) : 0;
+    }
+
+    // Try cgroup v1
+    size_t cg1_limit = read_cgroup_value("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+    if(cg1_limit > 0) {
+        // cgroup v1 sets limit to a very large number when unlimited
+        // (typically PAGE_COUNTER_MAX * PAGE_SIZE, around 2^63).
+        // Treat anything above 1 PB as "unlimited".
+        constexpr size_t CGROUP_V1_UNLIMITED_THRESHOLD = 1024ULL * TB;
+        if(cg1_limit < CGROUP_V1_UNLIMITED_THRESHOLD) {
+            size_t cg1_usage = read_cgroup_value("/sys/fs/cgroup/memory/memory.usage_in_bytes");
+            source = "cgroup v1";
+            return (cg1_limit > cg1_usage) ? (cg1_limit - cg1_usage) : 0;
+        }
+    }
+
+    // Fallback to host memory
+#ifdef __APPLE__
+    vm_statistics64_data_t vm_stat;
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    kern_return_t kr = host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                                          (host_info64_t)&vm_stat, &count);
+    if(kr != KERN_SUCCESS) {
+        LOG_ERROR(1751, "Failed to get macOS VM statistics");
+        return 0;
+    }
+    source = "host (macOS vm_stat)";
+    return ((size_t)vm_stat.free_count + (size_t)vm_stat.inactive_count) * vm_page_size;
+#else
+    // Linux: parse MemAvailable from /proc/meminfo
+    std::ifstream meminfo("/proc/meminfo");
+    if(!meminfo.is_open()) {
+        LOG_ERROR(1752, "Failed to open /proc/meminfo");
+        return 0;
+    }
+    std::string line;
+    while(std::getline(meminfo, line)) {
+        if(line.rfind("MemAvailable:", 0) == 0) {
+            size_t kb = 0;
+            if(sscanf(line.c_str(), "MemAvailable: %zu kB", &kb) == 1) {
+                source = "host (/proc/meminfo)";
+                return kb * 1024;
+            }
+        }
+    }
+    LOG_ERROR(1753, "MemAvailable not found in /proc/meminfo");
+    return 0;
+#endif
+}
+
+bool check_available_memory() {
+    std::string source;
+    size_t available = get_available_memory_bytes(source);
+
+    if(available == 0) {
+        LOG_ERROR(1750, "Could not determine available memory");
+        return false;
+    }
+
+    size_t required_bytes = settings::MINIMUM_REQUIRED_DRAM_MB * MB;
+    if(available < required_bytes) {
+        LOG_ERROR(1749, "Insufficient available memory: "
+                  << available / MB << " MB available (source: " << source
+                  << "), need at least " << settings::MINIMUM_REQUIRED_DRAM_MB << " MB");
+        return false;
+    }
+
+    LOG_INFO(1748, "Memory check passed: " << available / MB
+             << " MB available (source: " << source << ")");
+    return true;
+}
+
+// ============================================================================
+// Open files limit (ulimit -n)
+// ============================================================================
+
+bool check_open_files_limit() {
+    struct rlimit rlim;
+    if(getrlimit(RLIMIT_NOFILE, &rlim) != 0) {
+        LOG_ERROR(1756, "Failed to get RLIMIT_NOFILE");
+        return false;
+    }
+
+    LOG_INFO(1754, "Open files limit: soft=" << rlim.rlim_cur
+             << " hard=" << rlim.rlim_max);
+
+    if(rlim.rlim_cur < settings::MINIMUM_OPEN_FILES) {
+        LOG_ERROR(1755, "Open files soft limit (" << rlim.rlim_cur
+                  << ") is below minimum (" << settings::MINIMUM_OPEN_FILES
+                  << "). Increase with: ulimit -n " << settings::MINIMUM_OPEN_FILES);
+        return false;
+    }
+    return true;
+}
+
+// ============================================================================
+// Warning-level checks (informational, don't block startup)
+// ============================================================================
+
+bool check_total_physical_memory() {
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGESIZE);
+    if(pages <= 0 || page_size <= 0) {
+        LOG_WARN(1759, "Could not determine total physical memory");
+        return true;
+    }
+    size_t total = (size_t)pages * (size_t)page_size;
+    LOG_INFO(1757, "Total physical memory: " << total / MB << " MB");
+    if(total < 16 * GB) {
+        LOG_WARN(1758, "Total physical memory (" << total / MB
+                 << " MB) is low for a vector database workload");
+    }
+    return true;
+}
+
+bool check_cpu_cores() {
+    unsigned int cores = std::thread::hardware_concurrency();
+    LOG_INFO(1760, "CPU cores detected: " << cores);
+    if(cores < settings::DEFAULT_MINIMUM_CPU_CORES) {
+        LOG_WARN(1761, "CPU core count (" << cores
+                 << ") is below recommended minimum (" << settings::DEFAULT_MINIMUM_CPU_CORES << ")");
+    }
+    return true;
+}
+
+// ============================================================================
+// Orchestrator
+// ============================================================================
+
+bool run_startup_sanity_checks() {
+    LOG_INFO("=== Running system sanity checks ===");
+    bool critical_pass = true;
+
+    // Critical checks - any failure aborts startup
+    critical_pass &= check_cpu_compatibility();
+    critical_pass &= check_data_dir_permissions();
+    critical_pass &= check_disk_space();
+    critical_pass &= check_available_memory();
+    critical_pass &= check_open_files_limit();
+
+    // Warning checks - logged but don't block startup
+    check_total_physical_memory();
+    check_cpu_cores();
+
+    if(critical_pass) {
+        LOG_INFO("=== All system sanity checks passed ===");
+    } else {
+        LOG_ERROR(1799, "System sanity checks FAILED");
+    }
+    return critical_pass;
 }
