@@ -68,6 +68,8 @@ The same overload shapes apply to `LOG_WARN` and `LOG_ERROR`.
 ## Rules
 
 - Explicit numeric codes are preferred for stable operational logs.
+- Each numeric code must map to exactly one production log site. Do not reuse a code for a
+  different message or path.
 - Code-less logs are valid and must never receive synthesized IDs.
 - Prefer logging at request boundaries, lifecycle transitions, and rare failure paths.
 - Do not add logs in hot loops or per-vector/per-result paths.

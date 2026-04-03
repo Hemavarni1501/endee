@@ -451,7 +451,7 @@ int main(int argc, char** argv) {
                         body.has("sparse_model") ? std::string(body["sparse_model"].s()) : "None";
                 const auto sparse_model = ndd::sparseScoringModelFromString(sparse_model_str);
                 if(!sparse_model.has_value()) {
-                    LOG_WARN(1019, index_id, "Invalid sparse_model: " << sparse_model_str);
+                    LOG_WARN(1025, index_id, "Invalid sparse_model: " << sparse_model_str);
                     return json_error(
                         400,
                         "Invalid sparse_model. Must be one of: None, default, endee_bm25");
@@ -471,7 +471,7 @@ int main(int argc, char** argv) {
                     index_manager.createIndex(index_id, config, UserType::Admin, size_in_millions);
                     return crow::response(200, "Index created successfully");
                 } catch(const std::runtime_error& e) {
-                    LOG_WARN(1019, index_id, "Create-index request failed: " << e.what());
+                    LOG_WARN(1026, index_id, "Create-index request failed: " << e.what());
                     return json_error(409, e.what());
                 } catch(const std::exception& e) {
                     return json_error_500(
