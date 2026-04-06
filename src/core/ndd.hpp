@@ -1167,7 +1167,7 @@ public:
             throw;
         } catch(const std::exception& e) {
             LOG_ERROR(2027, index_id, "Batch insertion failed: " << e.what());
-            return false;
+            throw std::runtime_error(std::string("Batch insertion failed: ") + e.what());
         }
     }
 

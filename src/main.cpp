@@ -977,7 +977,14 @@ int main(int argc, char** argv) {
 
                     try {
                         bool success = index_manager.addVectors(index_id, vectors);
-                        return crow::response(success ? 200 : 400);
+                        if(!success) {
+                            LOG_WARN(1041,
+                                     ctx.username,
+                                     index_name,
+                                     "Insert request failed: some storage error");
+                            return json_error(400, "Batch insertion failed");
+                        }
+                        return crow::response(200);
                     } catch(const std::runtime_error& e) {
                         LOG_WARN(1041, ctx.username, index_name, "Insert request rejected: " << e.what());
                         return json_error(400, e.what());
@@ -995,13 +1002,27 @@ int main(int argc, char** argv) {
                             auto vectors = obj.as<std::vector<ndd::HybridVectorObject>>();
                             LOG_DEBUG("Batch size (Hybrid): " << vectors.size());
                             bool success = index_manager.addVectors(index_id, vectors);
-                            return crow::response(success ? 200 : 400);
+                            if(!success) {
+                                LOG_WARN(1042,
+                                         ctx.username,
+                                         index_name,
+                                         "Insert request failed: some storage error");
+                                return json_error(400, "Batch insertion failed");
+                            }
+                            return crow::response(200);
                         } catch(...) {
                             // Fallback to VectorObject
                             auto vectors = obj.as<std::vector<ndd::VectorObject>>();
                             LOG_DEBUG("Batch size (Dense): " << vectors.size());
                             bool success = index_manager.addVectors(index_id, vectors);
-                            return crow::response(success ? 200 : 400);
+                            if(!success) {
+                                LOG_WARN(1042,
+                                         ctx.username,
+                                         index_name,
+                                         "Insert request failed: some storage error");
+                                return json_error(400, "Batch insertion failed");
+                            }
+                            return crow::response(200);
                         }
                     } catch(const std::runtime_error& e) {
                         LOG_WARN(1042, ctx.username, index_name, "Insert request rejected: " << e.what());
