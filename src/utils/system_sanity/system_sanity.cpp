@@ -379,15 +379,20 @@ bool run_startup_sanity_checks() {
     LOG_INFO("=== Running system sanity checks ===");
     bool critical_pass = true;
 
-    // Critical checks - any failure aborts startup
+    // Ensure the host CPU supports the SIMD/instruction-set features required by this build.
     critical_pass &= check_cpu_compatibility();
+    // Ensure DATA_DIR exists or can be created and is usable for database reads and writes.
     critical_pass &= check_data_dir_permissions();
+    // Ensure the configured data directory has enough free space for startup to proceed safely.
     critical_pass &= check_disk_space();
+    // Ensure available memory, including cgroup-limited environments, meets the minimum requirement.
     critical_pass &= check_available_memory();
+    // Ensure the process can keep enough files open for expected database and index usage.
     critical_pass &= check_open_files_limit();
 
     // Warning checks - logged but don't block startup
     // check_total_physical_memory();
+    // Advisory only: warn when the machine has fewer CPU cores than the recommended minimum.
     check_cpu_cores();
 
     if(critical_pass) {
