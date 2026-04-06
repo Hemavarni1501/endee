@@ -978,10 +978,10 @@ int main(int argc, char** argv) {
                     try {
                         bool success = index_manager.addVectors(index_id, vectors);
                         if(!success) {
-                            LOG_WARN(1041,
+                            LOG_WARN(1066,
                                      ctx.username,
                                      index_name,
-                                     "Insert request failed: some storage error");
+                                     "Insert request failed without detailed error from addVectors");
                             return json_error(400, "Batch insertion failed");
                         }
                         return crow::response(200);
@@ -1003,10 +1003,10 @@ int main(int argc, char** argv) {
                             LOG_DEBUG("Batch size (Hybrid): " << vectors.size());
                             bool success = index_manager.addVectors(index_id, vectors);
                             if(!success) {
-                                LOG_WARN(1042,
+                                LOG_WARN(1067,
                                          ctx.username,
                                          index_name,
-                                         "Insert request failed: some storage error");
+                                         "Insert request failed without detailed error from addVectors");
                                 return json_error(400, "Batch insertion failed");
                             }
                             return crow::response(200);
@@ -1016,10 +1016,10 @@ int main(int argc, char** argv) {
                             LOG_DEBUG("Batch size (Dense): " << vectors.size());
                             bool success = index_manager.addVectors(index_id, vectors);
                             if(!success) {
-                                LOG_WARN(1042,
+                                LOG_WARN(1068,
                                          ctx.username,
                                          index_name,
-                                         "Insert request failed: some storage error");
+                                         "Insert request failed without detailed error from addVectors");
                                 return json_error(400, "Batch insertion failed");
                             }
                             return crow::response(200);
