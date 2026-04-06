@@ -255,10 +255,11 @@ int main(int argc, char** argv) {
 
     // ========== GENERAL ==========
     // Health check endpoint (no auth required)
-    CROW_ROUTE(app, "/api/v1/health").methods("GET"_method)([](const crow::request& req) {
+    // CROW_ROUTE(app, "/api/v1/health").methods("GET"_method)([](const crow::request& req) {
+    CROW_ROUTE(app, "/api/v1/health").methods("GET"_method)([]() {
         crow::json::wvalue response(
                 {{"status", "ok"},
-                 {"timestamp", std::chrono::system_clock::now().time_since_epoch().count()}});
+                {"timestamp", (std::int64_t)std::chrono::system_clock::now().time_since_epoch().count()}});
         PRINT_LOG_TIME();
         ndd::printSparseSearchDebugStats();
         ndd::printSparseUpdateDebugStats();
