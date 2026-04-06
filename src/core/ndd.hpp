@@ -109,7 +109,7 @@ struct CacheEntry {
      * evictIfNeeded, recoverIndex, deleteVectorsByFilter, updateFilters,
      * deleteIndex, executeBackupJob
      *
-     * readers: searchKNN, getVector, getIndexInfo
+     * readers: searchKNN, getVector, getIndexInfo (loaded-index path only)
      *
      * NOTE: std::shared_mutex dont guarantee fairness between
      * readers and writers. ie. currently it could be the case that either
@@ -220,7 +220,8 @@ private:
     std::thread autosave_thread_;
     std::atomic<bool> running_{true};
     BackupStore backup_store_;
-    void executeBackupJob(const std::string& index_id, const std::string& backup_name);
+    void executeBackupJob(const std::string& index_id, const std::string& backup_name,
+                          std::stop_token st);
 
     std::unique_ptr<WriteAheadLog> createWAL(const std::string& index_id) {
         const std::string wal_dir = data_dir_ + "/" + index_id;
@@ -364,11 +365,9 @@ private:
     }
 
     /**
-     * Returns the shared_ptr to CacheEntry
-     * 1. If Index is active (in-memory), return from there
-     * 2. Else, fetch from disk, make active and then return.
+     * Returns the CacheEntry if it is resident in memory.
      */
-    std::shared_ptr<CacheEntry> getIndexEntry(const std::string& index_id) {
+    std::shared_ptr<CacheEntry> findInMemoryIndexEntry(const std::string& index_id) {
 
         /**
          * First check the entry in thread local storage (TLS)
@@ -387,17 +386,30 @@ private:
         }
 
         /**
-         * First check if this index is in memory.
+         * Second check if this index is in global indices_.
          * A read lock on indices_mutex_ is enough for this.
          */
-        {
-            std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
-            auto it = indices_.find(index_id);
-            if(it != indices_.end()) {
-                auto entry = it->second;
-                per_thread_indices_[index_id] = entry;
-                return entry;
-            }
+        std::shared_lock<std::shared_mutex> read_lock(indices_mutex_);
+        auto it = indices_.find(index_id);
+        if(it == indices_.end() || !it->second || !it->second->cache_valid) {
+            return nullptr;
+        }
+
+        //update TLS indices_
+        auto entry = it->second;
+        per_thread_indices_[index_id] = entry;
+
+        return entry;
+    }
+
+    /**
+     * Returns the shared_ptr to CacheEntry
+     * 1. If Index is active (in-memory), return from there
+     * 2. Else, fetch from disk, make active and then return.
+     */
+    std::shared_ptr<CacheEntry> getIndexEntry(const std::string& index_id) {
+        if(auto entry = findInMemoryIndexEntry(index_id)) {
+            return entry;
         }
 
         /**
@@ -574,8 +586,12 @@ public:
     }
 
     ~IndexManager() {
-        // Signal autosave thread to stop
+        // Signal all threads to stop (running_ is checked by autosave and backup threads)
         running_ = false;
+
+        // Join background backup threads before destroying members
+        // (prevents use-after-free when detached threads outlive IndexManager)
+        backup_store_.joinAllThreads();
 
         /**
          * Don't wait for autosave thread to exit.
@@ -610,7 +626,7 @@ public:
                     LOG_INFO(2017, index_id, "Saving dirty index during shutdown");
                     saveIndex(index_id);
                 } catch(const std::exception& e) {
-                    LOG_ERROR(2017,
+                    LOG_ERROR(2015,
                                     index_id,
                                     "Failed to save index during shutdown: " << e.what());
                 }
@@ -893,7 +909,7 @@ public:
                 std::shared_lock<std::shared_mutex> lock(indices_mutex_);
                 auto it = indices_.find(index_id);
                 if(it != indices_.end() && it->second && it->second->is_dirty) {
-                    LOG_INFO(2023, index_id, "Saving dirty index before reload");
+                    LOG_INFO(2055, index_id, "Saving dirty index before reload");
                     saveIndex(index_id);
                 }
             }
@@ -1151,7 +1167,7 @@ public:
             throw;
         } catch(const std::exception& e) {
             LOG_ERROR(2027, index_id, "Batch insertion failed: " << e.what());
-            return false;
+            throw std::runtime_error(std::string("Batch insertion failed: ") + e.what());
         }
     }
 
@@ -1764,26 +1780,53 @@ public:
         return false;
     }
 
+    /**
+     * This function returns the information about a given index.
+     * Currently the implementation is as follows:
+     * 1. If the index is live (listed in IndexManager.indices_), populate
+     * information from there.
+     * 2. Else read the metadata and populate the information from there.
+     *
+     * NOTE: This is a stop-gap solution to make sure that elements_count
+     * is never stale. This should be fixed later with metadata overhaul.  
+     */
     std::optional<IndexInfo> getIndexInfo(const std::string& index_id) {
-        auto entry_ptr = getIndexEntry(index_id);
-        auto& entry = *entry_ptr;
 
-        /**
-         * XXX: We aren't using reader's lock here to enable reads while
-         * writing.
-         * TODO: check correctness when stressing the system.
-         * check other instances of shared_lock on operation_mutex.
-         */
-        std::shared_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
-        IndexInfo indx = {entry.alg->getElementsCount(),
-                          entry.alg->getDimension(),
-                          entry.sparse_model,
-                          entry.alg->getSpaceTypeStr(),
-                          entry.alg->getQuantLevel(),
-                          entry.alg->getChecksum(),
-                          entry.alg->getM(),
-                          entry.alg->getEfConstruction()};
-        return indx;
+        if(auto entry_ptr = findInMemoryIndexEntry(index_id)) {
+            /**
+             * XXX: We aren't using reader's lock here to enable reads while
+             * writing.
+             * TODO: check correctness when stressing the system.
+             * check other instances of shared_lock on operation_mutex.
+             */
+
+            std::shared_lock<std::shared_mutex> operation_lock(entry_ptr->operation_mutex);
+
+            return std::optional<IndexInfo>{std::in_place,
+                                            entry_ptr->alg->getElementsCount(),
+                                            entry_ptr->alg->getDimension(),
+                                            entry_ptr->sparse_model,
+                                            entry_ptr->alg->getSpaceTypeStr(),
+                                            entry_ptr->alg->getQuantLevel(),
+                                            entry_ptr->alg->getChecksum(),
+                                            entry_ptr->alg->getM(),
+                                            entry_ptr->alg->getEfConstruction()};
+        }
+
+        auto metadata = metadata_manager_->getMetadata(index_id);
+        if(!metadata) {
+            return std::nullopt;
+        }
+
+        return std::optional<IndexInfo>{std::in_place,
+                                        metadata->total_elements,
+                                        metadata->dimension,
+                                        metadata->sparse_model,
+                                        std::move(metadata->space_type_str),
+                                        metadata->quant_level,
+                                        metadata->checksum,
+                                        metadata->M,
+                                        metadata->ef_con};
     }
 
     // Method to log vector additions with both numeric and string IDs
@@ -1860,7 +1903,7 @@ public:
         return backup_store_.deleteBackup(backup_name, username);
     }
 
-    std::optional<ActiveBackup> getActiveBackup(const std::string& username) {
+    std::optional<std::pair<std::string, std::string>> getActiveBackup(const std::string& username) {
         return backup_store_.getActiveBackup(username);
     }
 
@@ -1876,7 +1919,8 @@ public:
 
 // ========== IndexManager backup implementations ==========
 
-inline void IndexManager::executeBackupJob(const std::string& index_id, const std::string& backup_name) {
+inline void IndexManager::executeBackupJob(const std::string& index_id, const std::string& backup_name,
+                                            std::stop_token st) {
     std::string username;
     size_t upos = index_id.find('/');
     if (upos != std::string::npos) {
@@ -1937,6 +1981,13 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
             throw std::runtime_error("Cannot create backup without index metadata");
         }
 
+        // Check stop_token before expensive operations
+        if (st.stop_requested()) {
+            LOG_INFO(2056, index_id, "Backup cancelled before backup work started");
+            backup_store_.clearActiveBackup(username);
+            return;
+        }
+
         auto entry_ptr = getIndexEntry(index_id);
         auto& entry = *entry_ptr;
         std::string metadata_file_in_index = source_dir + "/metadata.json";
@@ -1950,6 +2001,13 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
              * Check other instances of shared_lock on operation_mutex.
              */
             std::unique_lock<std::shared_mutex> operation_lock(entry.operation_mutex);
+
+            // Check again after acquiring lock (shutdown may have been requested while waiting)
+            if (st.stop_requested()) {
+                LOG_INFO(2057, index_id, "Backup cancelled");
+                backup_store_.clearActiveBackup(username);
+                return;
+            }
 
             saveIndexInternal(entry);
 
@@ -1970,7 +2028,7 @@ inline void IndexManager::executeBackupJob(const std::string& index_id, const st
 
             std::string error_msg;
             LOG_DEBUG("Creating tar archive from " << source_dir << " to " << backup_tar_temp);
-            if(!backup_store_.createBackupTar(source_dir, backup_tar_temp, error_msg)) {
+            if(!backup_store_.createBackupTar(source_dir, backup_tar_temp, error_msg, st)) {
                 if(std::filesystem::exists(metadata_file_in_index)) {
                     std::filesystem::remove(metadata_file_in_index);
                 }
@@ -2140,12 +2198,10 @@ inline std::pair<bool, std::string> IndexManager::createBackupAsync(const std::s
         return {false, "Backup already exists: " + backup_name};
     }
 
-    (void)getIndexEntry(index_id);
-    backup_store_.setActiveBackup(username, index_id, backup_name);
-
-    std::thread([this, index_id, backup_name]() {
-        executeBackupJob(index_id, backup_name);
-    }).detach();
+    std::jthread t([this, index_id, backup_name](std::stop_token st) {
+        executeBackupJob(index_id, backup_name, st);
+    });
+    backup_store_.setActiveBackup(username, index_id, backup_name, std::move(t));
 
     LOG_INFO(2046, index_id, "Backup started: " << backup_name);
 
