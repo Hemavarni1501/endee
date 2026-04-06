@@ -75,7 +75,7 @@ namespace settings {
     constexpr size_t MINIMUM_REQUIRED_FS_BYTES = (10 * GB);
 
     // System sanity check thresholds
-    constexpr size_t DEFAULT_MINIMUM_REQUIRED_DRAM_MB = (4 * GB); 
+    constexpr size_t DEFAULT_MINIMUM_REQUIRED_DRAM_MB = (4 * 1024); //GB in MB
     constexpr size_t MINIMUM_OPEN_FILES = 5000;
     constexpr size_t DEFAULT_MINIMUM_CPU_CORES = 2;
 
