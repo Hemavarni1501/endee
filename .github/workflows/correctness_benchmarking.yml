@@ -219,6 +219,7 @@ jobs:
             --key-name ${{ secrets.ENDEE_PEM }} \
             --security-group-ids ${{ secrets.VECTORDBBENCH_SERVER_GROUP_ID }} \
             --subnet-id ${{ secrets.AWS_SUBNET_ID }} \
+            --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
             --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$ENDEE_INSTANCE_NAME}]" \
             --query 'Instances[0].InstanceId' \
             --output text)
@@ -519,7 +520,8 @@ jobs:
             arc=\$(grep -o 'avx2\|avx512\|neon\|sve2' /proc/cpuinfo | sort -u)
             echo "ARCHITECTURE: \$arc"
 
-            
+            # UPDATE ULIMIT OF OS 
+            ulimit -n 5000
 
             # BUILD ENDEE IMAGE
             echo "BUILDING ENDEE IMAGE"
@@ -531,7 +533,7 @@ jobs:
 
             # RUN THE ENDEE CONTAINER
             echo "RUNNING ENDEE CONTAINER"
-            sudo docker run -d -p 8080:8080 -v endee-data:/data -e NDD_AUTH_TOKEN="" --name endee-server endee-oss:latest
+            sudo docker run --ulimit nofile=5000:5000 -d -p 8080:8080 -v endee-data:/data -e NDD_AUTH_TOKEN="" --name endee-server endee-oss:latest
 
             # CHECK IF THE CONTAINER IS RUNNING
             echo "CHECKING IF THE CONTAINER IS RUNNING"
