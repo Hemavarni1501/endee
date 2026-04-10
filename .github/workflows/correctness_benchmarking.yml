@@ -502,6 +502,15 @@ jobs:
               sudo systemctl enable docker 
 
               echo "DOCKER INSTALLED: \$(docker --version)"
+
+              # Download docker compose binary directly
+              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+
+              # Give execute permission
+              sudo chmod +x /usr/local/bin/docker-compose
+
+              mkdir -p ~/.docker/cli-plugins
+              cp /usr/local/bin/docker-compose ~/.docker/cli-plugins/docker-compose
             fi
 
             # # RUN WITHOUT SUDO — ADD username TO DOCKER GROUP
@@ -525,7 +534,7 @@ jobs:
 
             # BUILD ENDEE IMAGE
             echo "BUILDING ENDEE IMAGE"
-            sudo docker build --ulimit nofile=100000:100000 --build-arg BUILD_ARCH="\$arc" --build-arg DEBUG=true -t endee-oss:latest -f ./infra/Dockerfile .
+            sudo docker build --build-arg BUILD_ARCH="\$arc" --build-arg DEBUG=true -t endee-oss:latest -f ./infra/Dockerfile .
 
             # DOWN THE EXISTING CONTAINER IF EXISTS
             echo "DOWNING THE EXISTING CONTAINER IF EXISTS"
@@ -533,7 +542,7 @@ jobs:
 
             # RUN THE ENDEE CONTAINER
             echo "RUNNING ENDEE CONTAINER"
-            sudo docker run --ulimit nofile=5000:5000 -d -p 8080:8080 -v endee-data:/data -e NDD_AUTH_TOKEN="" --name endee-server endee-oss:latest
+            sudo docker compose up -d
 
             # CHECK IF THE CONTAINER IS RUNNING
             echo "CHECKING IF THE CONTAINER IS RUNNING"
