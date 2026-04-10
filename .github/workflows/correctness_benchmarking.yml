@@ -1,6 +1,6 @@
 name: VectorDB - Run Correctness Benchmark
 
-# ============ TRIGGER: PR COMMENT CONTAINING /correctness_benchmarking =================== 
+# ============ TRIGGER: PR COMMENT CONTAINING /correctness_benchmarking ===================
 on:
   issue_comment:
     types: [ created ]
@@ -219,6 +219,7 @@ jobs:
             --key-name ${{ secrets.ENDEE_PEM }} \
             --security-group-ids ${{ secrets.VECTORDBBENCH_SERVER_GROUP_ID }} \
             --subnet-id ${{ secrets.AWS_SUBNET_ID }} \
+            --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
             --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$ENDEE_INSTANCE_NAME}]" \
             --query 'Instances[0].InstanceId' \
             --output text)
@@ -501,6 +502,15 @@ jobs:
               sudo systemctl enable docker 
 
               echo "DOCKER INSTALLED: \$(docker --version)"
+
+              # Download docker compose binary directly
+              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+
+              # Give execute permission
+              sudo chmod +x /usr/local/bin/docker-compose
+
+              mkdir -p ~/.docker/cli-plugins
+              cp /usr/local/bin/docker-compose ~/.docker/cli-plugins/docker-compose
             fi
 
             # # RUN WITHOUT SUDO — ADD username TO DOCKER GROUP
@@ -519,11 +529,12 @@ jobs:
             arc=\$(grep -o 'avx2\|avx512\|neon\|sve2' /proc/cpuinfo | sort -u)
             echo "ARCHITECTURE: \$arc"
 
-            
+            # UPDATE ULIMIT OF OS 
+            ulimit -n 5000
 
             # BUILD ENDEE IMAGE
             echo "BUILDING ENDEE IMAGE"
-            sudo docker build --ulimit nofile=100000:100000 --build-arg BUILD_ARCH="\$arc" --build-arg DEBUG=true -t endee-oss:latest -f ./infra/Dockerfile .
+            sudo docker build --build-arg BUILD_ARCH="\$arc" --build-arg DEBUG=true -t endee-oss:latest -f ./infra/Dockerfile .
 
             # DOWN THE EXISTING CONTAINER IF EXISTS
             echo "DOWNING THE EXISTING CONTAINER IF EXISTS"
@@ -531,7 +542,7 @@ jobs:
 
             # RUN THE ENDEE CONTAINER
             echo "RUNNING ENDEE CONTAINER"
-            sudo docker run -d -p 8080:8080 -v endee-data:/data -e NDD_AUTH_TOKEN="" --name endee-server endee-oss:latest
+            sudo docker compose up -d
 
             # CHECK IF THE CONTAINER IS RUNNING
             echo "CHECKING IF THE CONTAINER IS RUNNING"
