@@ -14,5 +14,13 @@
   {
     "question": "What is machine learning?",
     "answer": "Machine learning is a field of AI that enables systems to learn from data."
+  },
+   {
+    "question": "What is Artificial Intelligence?",
+    "answer": "Artificial Intelligence is the simulation of human intelligence by machines."
+  },
+  {
+    "question": "What is RAG?",
+    "answer": "RAG stands for Retrieval Augmented Generation, combining retrieval with generation."
   }
 ]

@@ -1,51 +1,78 @@
 import json
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Load model
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# Load dataset
+# Load FAQ data
 with open("faq.json", "r") as f:
     data = json.load(f)
 
-# Prepare vectors
-questions = [item["question"] for item in data]
-answers = [item["answer"] for item in data]
+# Prepare embeddings
+questions = []
+answers = []
+embeddings = []
 
-question_embeddings = model.encode(questions)
+for item in data:
+    q = item["question"]
+    a = item["answer"]
 
-# Cosine similarity
-def cosine_similarity(a, b):
-    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+    questions.append(q)
+    answers.append(a)
 
-def search(query):
-    query_embedding = model.encode(query)
+    emb = model.encode(q)
+    embeddings.append(emb)
 
-    similarities = [
-        cosine_similarity(query_embedding, q_emb)
-        for q_emb in question_embeddings
-    ]
-
-    best_idx = np.argmax(similarities)
-    best_score = similarities[best_idx]
-
-    if best_score < 0.5:
-        return "Sorry, I couldn't find a relevant answer.", best_score
-
-    return answers[best_idx], best_score
+embeddings = np.array(embeddings)
 
 
+# 🔍 Semantic search
+def search(query, top_k=3):
+    query_embedding = model.encode(query).reshape(1, -1)
+
+    similarities = cosine_similarity(query_embedding, embeddings)[0]
+
+    top_indices = np.argsort(similarities)[-top_k:][::-1]
+
+    results = []
+    for idx in top_indices:
+        results.append({
+            "question": questions[idx],
+            "answer": answers[idx],
+            "score": similarities[idx]
+        })
+
+    return results
+
+
+# 🧠 Simple answer generator
+def generate_answer(results):
+    # For now: return best answer
+    return results[0]["answer"]
+
+
+# 🚀 CLI
 if __name__ == "__main__":
-    print("🔍 Research Assistant Ready (type 'exit' to quit)\n")
+    print("FAQ Research Assistant Ready 🚀")
 
     while True:
-        query = input("You: ")
+        q = input("\nAsk a question (or 'exit'): ")
 
-        if query.lower() == "exit":
+        if q.lower() == "exit":
             break
 
-        answer, score = search(query)
+        results = search(q)
 
-        print(f"Answer: {answer}")
-        print(f"Confidence: {round(score, 2)}\n")
+        print("\nTop Matches:\n")
+        for r in results:
+            print(f"Q: {r['question']}")
+            print(f"A: {r['answer']}")
+            print(f"Score: {r['score']:.4f}")
+            print("-" * 50)
+
+        final_answer = generate_answer(results)
+
+        print("\n✅ Final Answer:")
+        print(final_answer)
